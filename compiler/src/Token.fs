@@ -71,6 +71,8 @@ type TokenType =
     | Use
     | Mutable
     | Pub
+    | Import
+    | As
 
     // Literals.
     | Identifier
@@ -122,4 +124,6 @@ let keywords: Map<string, TokenType> =
         "use", Use
         "mut", Mutable
         "pub", Pub
+        "import", Import
+        "as", As
     ]

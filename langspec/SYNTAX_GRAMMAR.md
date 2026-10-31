@@ -141,14 +141,29 @@ own top-level grammar grew from `0.1`'s.
   top-level ambiguity versus cons: the second `|` only appears once a
   parse has already committed to the comprehension branch (having seen
   at least one `<-`), which cons parsing never reaches.
+* **Modules (`docs/PLAN-0.3.md` decisions 4-8, Phase 5).** A file is a
+  module named by its path relative to the entry file's directory
+  (`math/vector.iqx` → `math.vector`); there is no `module` declaration.
+  In `importItem` the **last** dotted segment is the imported member and
+  everything before it is the module path, so at least two segments are
+  required. `pub` is a **prefix** on a top-level declaration and exports
+  it; it is a compile error anywhere else (class-member `pub` is
+  unchanged and lives in `propertyDecl`/`method` below). `import` is only
+  valid at the top level of a file, in any position. These are semantic
+  rules, not grammar: imported names are read-only bindings; importing a
+  name that collides with a local declaration, another import, a native
+  or a prelude name is an "already declared" error unless renamed with
+  `as`; importing a non-`pub` declaration is an error. `import` and `as`
+  are reserved words.
 ##
     program         → declaration* EOF ;
 
-    declaration     → classDecl
-                    | traitDecl
-                    | funDecl
-                    | varDecl
+    declaration     → importDecl
+                    | "pub"? ( classDecl | traitDecl | funDecl | varDecl )
                     | statement ;
+
+    importDecl      → "import" importItem ( "," importItem )* ";?" ;
+    importItem      → IDENTIFIER ( "." IDENTIFIER )+ ( "as" IDENTIFIER )? ;
 
     classDecl       → "class" IDENTIFIER ( "extends" IDENTIFIER )?
                        ( "with" IDENTIFIER ( "," IDENTIFIER )* )?

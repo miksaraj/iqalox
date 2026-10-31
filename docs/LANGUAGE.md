@@ -57,6 +57,7 @@ isn't a goal.
 14. [Errors](#14-errors)
 15. [Known limitations](#15-known-limitations)
 16. [Grammar and precedence reference](#16-grammar-and-precedence-reference)
+17. [Modules and imports](#17-modules-and-imports-new-for-03)
 
 ## 1. Introduction and classification
 
@@ -1328,6 +1329,16 @@ for the full history of how each was arrived at.
     construct available to it — a shape mismatch surfaces as the
     ordinary "vector index out of range" error a step later, not a
     dedicated shape-mismatch message. See [§13](#13-the-standard-library).
+13. **A `pub trait`'s method bodies resolve in the *importing* module's
+    name space.** Traits are inlined into whichever class `use`s them
+    (compile time, no runtime representation), so a trait method that
+    calls a private, module-local function of its own file won't find it
+    when the trait is used from another module. (A `pub class`'s methods
+    don't have this problem — they stay compiled in their own module.)
+    See [§17](#17-modules-and-imports-new-for-03).
+14. **Runtime errors in a multi-file program carry no file name.** The
+    `[line N]` refers to a line in *some* source file; the bytecode line
+    table has no file dimension. See [§14](#14-errors).
 
 The following limitations from earlier versions are **resolved**:
 vectors being literal-only with no indexing/mutation/length (now fixed as
@@ -1350,3 +1361,65 @@ presented tightest-to-loosest) is in the root `README.md`. Both describe
 the language independent of any one implementation — refer to those files
 directly rather than duplicating them here, since a third copy would only
 be one more place for the three to drift out of sync.
+
+## 17. Modules and imports (new for `0.3`)
+
+A program can span several files. You compile only the **entry file**;
+the compiler follows its `import` statements to find the rest and still
+produces **one** bytecode file, so the VM never knows more than one source
+file existed.
+
+```
+iqaloxc langspec/examples/modules/main.iqx out.iqbc
+```
+
+**Modules are files.** A file's module name is its path relative to the
+entry file's directory, dotted, without the extension: `math/vector.iqx`
+is module `math.vector`. There is no `module` declaration.
+
+**`pub` exports.** Prefix a top-level `fun`, `var`, `class` or `trait`
+with `pub` to make it importable from other files. Anything without
+`pub` is private to its own file — though a `pub` function can still use
+the file's private helpers freely. `pub` anywhere other than the top
+level of a file is a compile error.
+
+```
+# math/vector.iqx
+var offset = 100                    # private to this file
+fun shifted(n) { return n + offset }  # private
+
+pub fun double(n) {                 # importable
+    return shifted(n) - offset + n
+}
+pub var origin = [0, 0]             # importable (add `mut` for pub var x mut = ...)
+```
+
+**`import`** brings specific names in, unqualified. The last dotted
+segment is the name; everything before it is the module path. Several
+can be listed, comma-separated, and `as` binds one under another name:
+
+```
+import math.vector.double, math.vector.origin as zero
+import shapes.Shape, shapes.Named
+```
+
+- `import` is only allowed at the top level of a file (not inside a
+  function, class or block), and may appear anywhere there.
+- **Imported names are read-only.** You can read an imported `var` but
+  never assign to it, even if its exporter declared it `mut`.
+- **No silent shadowing.** Importing a name that collides with a
+  declaration in the importing file, another import, a built-in or a
+  standard-library name (`map`, `print`, ...) is a compile-time
+  `Variable 'x' already declared.` error; `as` is how you resolve it.
+- Importing a name that isn't `pub`, or doesn't exist, is a compile-time
+  error naming the module and the name.
+- Two different modules may each declare a top-level `helper`; they don't
+  clash, because each file's declarations are its own.
+- Circular imports (including back to the entry file) are a compile-time
+  error.
+- Imported classes and traits compose like local ones: a class can
+  `extends` or `with` an imported class and `use` an imported trait, and
+  a subclass's `self.x` is checked against the imported class's members
+  as usual (limitation: [§15](#15-known-limitations) item 13 for traits).
+
+`langspec/examples/modules/` has a complete three-file program.

@@ -735,3 +735,57 @@ let ``spread's inner expression can be an arbitrary expression, not just an iden
     match singleExpr "[...(a)]" with
     | Vector [ Spread(Grouping(Variable inner), _) ] -> Assert.Equal("a", inner.Lexeme)
     | e -> failwith $"expected Vector with one Spread(Grouping) element, got %A{e}"
+
+// --- docs/PLAN-0.3.md Phase 5: `pub` on top-level declarations and `import` ---
+
+let private lexemes (tokens: Token list) = tokens |> List.map (fun t -> t.Lexeme)
+
+[<Fact>]
+let ``import splits the last dotted segment off as the member name`` () =
+    match parseSource "import math.vector.transpose" with
+    | [ ImportStmt(_, [ item ]) ] ->
+        Assert.Equal<string list>([ "math"; "vector" ], lexemes item.Module)
+        Assert.Equal("transpose", item.Name.Lexeme)
+        Assert.True item.Alias.IsNone
+    | other -> failwith $"unexpected: %A{other}"
+
+[<Fact>]
+let ``import takes a comma-separated list with optional as-aliases`` () =
+    match parseSource "import a.b.x, c.y as why, d.e.f as g" with
+    | [ ImportStmt(_, [ one; two; three ]) ] ->
+        Assert.Equal("x", one.Name.Lexeme)
+        Assert.Equal<string list>([ "c" ], lexemes two.Module)
+        Assert.Equal("why", two.Alias.Value.Lexeme)
+        Assert.Equal("g", three.Alias.Value.Lexeme)
+    | other -> failwith $"unexpected: %A{other}"
+
+[<Fact>]
+let ``an import needs both a module path and a name`` () =
+    let _, errors = parseWithErrors "import vector"
+    Assert.Single errors |> ignore
+    Assert.Contains("module path and a name", errors.[0].Message)
+
+[<Fact>]
+let ``import with a dangling as is a parse error`` () =
+    let _, errors = parseWithErrors "import a.b as"
+    Assert.NotEmpty errors
+
+[<Fact>]
+let ``pub wraps a top-level fun, var, class or trait`` () =
+    let wrapped =
+        parseSource "pub fun f() {\n}\npub var x = 1\npub var y mut = 2\npub class C {\n}\npub trait T {\n}"
+    match wrapped with
+    | [ PubStmt(_, FunctionStmt _); PubStmt(_, VarStmt(_, _, false)); PubStmt(_, VarStmt(_, _, true))
+        PubStmt(_, ClassStmt _); PubStmt(_, TraitStmt _) ] -> ()
+    | other -> failwith $"unexpected: %A{other}"
+
+[<Fact>]
+let ``pub before anything else is a parse error`` () =
+    let _, errors = parseWithErrors "pub print 1"
+    Assert.NotEmpty errors
+    Assert.Contains("after 'pub'", errors.[0].Message)
+
+[<Fact>]
+let ``import and as are reserved words now`` () =
+    let _, errors = parseWithErrors "var as = 1"
+    Assert.NotEmpty errors

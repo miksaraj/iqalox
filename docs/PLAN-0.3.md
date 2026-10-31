@@ -237,7 +237,7 @@ each one, verified via new tests (§6).
 | Multi-generator list comprehensions | §1.1 | Done |
 | List comprehension guard clause | §1.1 | Done |
 | Unused-variable compile-time warning | §2.3 | Done |
-| Module support (file-based, `import`, compile-time-only) | §1.4-9 | In progress (Phase 4 plumbing done; `import`/`pub` export = Phase 5) |
+| Module support (file-based, `import`, compile-time-only) | §1.4-9 | Done |
 | Array-manipulation stdlib namespace revisit | §2.1 | Not started (open question) |
 | First set of compiler optimizations | §2.2 | Not started |
 
@@ -537,13 +537,99 @@ Known limitation carried over from the prelude merge: runtime errors report
 a line number with no indication of which file it belongs to
 (the bytecode line table has no file dimension).
 
-**Phase 5 — Module system: `import` and `pub`-as-export.** The `import`
-statement itself (decision 5), module-qualified name resolution, and
-enforcing decision 6's export rule (a non-`pub` top-level declaration is
-invisible outside its own file). This is also where every
-`langspec/examples/*.iqx` fixture gets audited for the new default-
-private-at-module-level rule, the same kind of audit `0.2`'s Phase 7 did
-for method visibility.
+**Phase 5 — Module system: `import` and `pub`-as-export — done.** The
+last syntax details decisions 5 and 6 left open were put to the
+repository owner when the phase started, and answered:
+
+- **`pub` is a prefix** on a top-level declaration: `pub fun f()`,
+  `pub var x` / `pub var x mut = 1`, `pub class C`, `pub trait T`
+  (`pub` anywhere but the top level is a compile error).
+- **Imports are read-only bindings.** An importer can read an imported
+  `var` but never assign to it, even if the exporter declared it `mut`.
+- **A name collision is an error, and `as` renames** (a new `as`
+  keyword, beyond what decision 5 originally sketched):
+  `import math.vector.transpose as vtranspose`. The collision rule —
+  against a local declaration, another import, a native or a prelude
+  name — is the same "Variable 'x' already declared." error the language
+  already raises elsewhere; there is no silent shadowing.
+- **`import` is allowed anywhere at the top level of a file** (not inside
+  a function, class or block), in any order relative to other
+  declarations — imports are collected before resolution begins.
+
+`import` and `as` are new reserved words (no existing fixture used either
+as an identifier). Syntax: `Ast.ImportStmt` (a list of `ImportItem`s: the
+dotted module path, the imported name — always the **last** segment, per
+decision 5 — and an optional alias) and `Ast.PubStmt`, a wrapper around
+the declaration it exports, chosen over adding an `IsPub` field to four
+different statement cases so that no existing pattern match had to change.
+`Parser.fs` gained `PubDeclaration`/`ImportDeclaration`; `import a` with no
+member is a parse error.
+
+`Resolver.resolveUnit` now takes the unit's `ImportBinding`s and returns
+its `Exports`. A top-level `PubStmt` is unwrapped up front, recording
+which names were exported; `pub` declarations are exempt from the
+unused-global warning (they are the module's public surface). An imported
+name is seeded into the importer's globals as an immutable global — which
+is what gives read-only imports and the collision error for free — and an
+`aliases` table makes references to it bind to the exporter's *qualified*
+global (`math.vector::double`) rather than to the local spelling.
+Classes and traits need more than a name: type-checking `extends`/`with`/
+`use` and `self.x` in an importer needs the exporter's member sets, but
+the exporter's raw class/trait tables mean nothing in another module's
+name space (they refer to names local to the exporter). So a `pub class`
+exports its fully **effective** member set (own + inherited + mixed in)
+and a `pub trait` its fully **flattened** one, and the importer seeds
+synthetic entries from those (`ClassInfo.IsImported`, skipped by the
+unused-member check, which belongs to the module that declared the
+class). Consequently decision 9 held: `extends`/`with`/`use` over an
+imported class or trait work with no further special casing.
+
+`Modules.linkModules` resolves modules in dependency order, so every
+`import` is checked against an already-resolved exporter: unknown
+member (`Module 'm' has no top-level 'x'.`) and importing a non-`pub`
+declaration (`'x' in module 'm' is not 'pub', so it can't be imported.`)
+are distinct errors, attributed to the importing file. `Program.fs`'s
+parse callback now reports each file's dependencies via
+`Modules.importedModuleNames`, so `import` drives Phase 4's loader end
+to end; a cycle (including one through the entry module) is the loader's
+existing error. `resolve`/`resolveWithExemptGlobals` (no linker) reject
+a top-level `import` rather than silently dropping it.
+
+Verification: all 15 existing top-level examples still compile to
+**byte-identical** bytecode with zero warnings — this is the audit the
+plan called for ("every fixture gets audited for the new default-private
+rule"): every existing fixture is a single file that nothing imports
+from, so none needed a `pub`. A real three-file program
+(`langspec/examples/modules/`: a private helper reached through an
+exported function, an exported `var`, an imported class extended by a
+local subclass, an imported trait `use`d by it, and an `as` alias) was
+compiled through the actual CLI and run on the real VM. Error paths
+checked through the CLI as well (non-`pub` import, missing member, name
+collision, assignment to an import, nested `import`, circular import).
+24 new xUnit tests: 7 parser (import splitting/lists/aliases, malformed
+imports, `pub` wrapping all four declaration kinds, bad `pub`, the new
+reserved words) and 17 linker (binding to qualified globals, alias,
+aliasing around a collision, each error above, read-only imports, extend
+an imported class, undeclared-property check still applies to a subclass
+of an imported class, `use` an imported trait, `pub` unused-exemption,
+nested `import`/`pub`, in-isolation rejection, transitive chains).
+
+Known limitations, deliberately not papered over:
+
+- **A used trait's body is inlined into the importing class**
+  (decision 12's PHP-style inlining), so it is resolved in the
+  *importer's* name space: a `pub trait` whose method calls a private,
+  module-local function of its own file will not find it from another
+  module. Classes don't have this problem (their methods stay compiled
+  in the exporting module). Fixing it needs trait bodies to carry their
+  home module's bindings; flagged for the repository owner rather than
+  guessed at.
+- An **unused import** is not warned about (decision 4's warning covers
+  locals, parameters, private members and top-level `var`/`fun`
+  declarations only; imports weren't part of what was asked for).
+- Runtime errors still report a bare `[line N]` with no file (the
+  bytecode line table has no file dimension), now reachable from real
+  multi-file programs.
 
 **Phase 6 — Revisit: array-manipulation stdlib under a namespace.**
 Blocked on open question 1 — raise it with the repository owner once

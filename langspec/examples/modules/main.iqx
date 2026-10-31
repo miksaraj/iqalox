@@ -1,0 +1,41 @@
+<#
+    Multi-file programs (0.3). Compile the entry file only:
+
+        iqaloxc langspec/examples/modules/main.iqx out.iqbc
+
+    The compiler follows `import` statements to find the other files
+    (relative to this file's directory) and still produces ONE bytecode
+    file -- the VM never knows the program came from several sources.
+
+    `import a.b.name` brings `name` from module `a.b` in unqualified;
+    `as` renames it locally (needed to resolve a name collision, which
+    is otherwise a compile-time error). Imported names are read-only.
+    `import` is only allowed at the top level of a file.
+#>
+
+import math.vector.double, math.vector.origin as zero
+import shapes.Shape, shapes.Named
+
+# An imported class can be extended; an imported trait can be `use`d.
+class Square extends Shape {
+    use Named
+
+    var side pub mut
+
+    init(side) {
+        super.init(4)
+        self.label = "square"
+        self.side = side
+    }
+
+    pub area() {
+        return self.side * self.side
+    }
+}
+
+var sq = Square(3)
+print double 21
+print zero
+print sq.area()
+print sq.sides
+print sq.describe()

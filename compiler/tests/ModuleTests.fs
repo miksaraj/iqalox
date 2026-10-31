@@ -32,7 +32,7 @@ let private names (r: Result<ModuleSource list, string list>) =
     | Ok ms -> ms |> List.map (fun m -> m.Name)
     | Error e -> failwith $"expected Ok, got %A{e}"
 
-let private prelude () = resolveUnit [] (parseText Iqalox.Prelude.source)
+let private prelude () = resolveUnit [] [] (parseText Iqalox.Prelude.source)
 
 [<Fact>]
 let ``a module's name is its path relative to the root, dotted`` () =
@@ -156,5 +156,160 @@ let ``diagnostics are attributed to the module that produced them`` () =
 [<Fact>]
 let ``a linked multi-module program compiles to a single chunk`` () =
     let linked = link [ "main", "print 1", [ "dep" ]; "dep", "var helper = 2\nprint helper", [] ]
+    let _, codegenErrors = compile linked.Bound
+    Assert.Empty codegenErrors
+
+// --- docs/PLAN-0.3.md Phase 5: import / pub-as-export ---
+
+/// Like `link`, but each file's dependencies come from its own `import`
+/// statements (via `importedModuleNames`), exactly as `Program.fs` does.
+let private linkAuto (files: (string * string) list) =
+    let parseFile path =
+        match files |> List.tryFind (fun (n, _) -> pathOf n = path) with
+        | Some(_, source) ->
+            let stmts = parseText source
+            Ok(stmts, importedModuleNames stmts)
+        | None -> Error [ $"missing {path}" ]
+    match loadModules (pathOf "main") parseFile with
+    | Ok ms -> linkModules (prelude ()) ms
+    | Error e -> failwith $"%A{e}"
+
+let private errorsOf (linked: LinkedProgram) (moduleName: string) =
+    (linked.Diagnostics |> List.find (fun d -> d.Module = moduleName)).Errors |> List.map (fun e -> e.Message)
+
+let private warningsOf (linked: LinkedProgram) (moduleName: string) =
+    (linked.Diagnostics |> List.find (fun d -> d.Module = moduleName)).Warnings |> List.map (fun e -> e.Message)
+
+let private globalRefs (linked: LinkedProgram) =
+    let rec walk (e: BoundExpr) =
+        match e with
+        | BVariable(GlobalBinding n, _) -> [ n ]
+        | BCall(c, args) -> walk c @ List.collect walk args
+        | _ -> []
+    linked.Bound
+    |> List.collect (function
+        | BExpressionStmt e -> walk e
+        | BVarStmt(_, _, Some e) -> walk e
+        | _ -> [])
+
+[<Fact>]
+let ``importing a pub function binds the importer's calls to the exporter's qualified global`` () =
+    let linked =
+        linkAuto [ "main", "import dep.f\nprint f()"; "dep", "pub fun f() {\n    return 1\n}" ]
+    Assert.Empty(errorsOf linked "main")
+    Assert.Contains("dep::f", globalRefs linked)
+
+[<Fact>]
+let ``as binds the import under the alias instead of its own name`` () =
+    let linked =
+        linkAuto [ "main", "import dep.f as g\nprint g()"; "dep", "pub fun f() {\n    return 1\n}" ]
+    Assert.Empty(errorsOf linked "main")
+    Assert.Contains("dep::f", globalRefs linked)
+    Assert.DoesNotContain("g", globalRefs linked)
+
+[<Fact>]
+let ``the same name can be imported from two modules by aliasing one`` () =
+    let linked =
+        linkAuto
+            [ "main", "import a.f, b.f as f2\nprint f()\nprint f2()"
+              "a", "pub fun f() {\n    return 1\n}"
+              "b", "pub fun f() {\n    return 2\n}" ]
+    Assert.Empty(errorsOf linked "main")
+    Assert.Contains("a::f", globalRefs linked)
+    Assert.Contains("b::f", globalRefs linked)
+
+[<Fact>]
+let ``importing a non-pub name is an error that says so`` () =
+    let linked = linkAuto [ "main", "import dep.hidden"; "dep", "fun hidden() {\n    return 1\n}" ]
+    match errorsOf linked "main" with
+    | [ msg ] -> Assert.Contains("is not 'pub'", msg)
+    | other -> failwith $"unexpected: %A{other}"
+
+[<Fact>]
+let ``importing a name the module doesn't declare is an error`` () =
+    let linked = linkAuto [ "main", "import dep.ghost"; "dep", "pub var x = 1" ]
+    match errorsOf linked "main" with
+    | [ msg ] -> Assert.Contains("has no top-level 'ghost'", msg)
+    | other -> failwith $"unexpected: %A{other}"
+
+[<Fact>]
+let ``an import colliding with a local declaration is an already-declared error`` () =
+    let linked = linkAuto [ "main", "import dep.f\nfun f() {\n    return 2\n}"; "dep", "pub fun f() {\n    return 1\n}" ]
+    Assert.Contains("Variable 'f' already declared.", errorsOf linked "main")
+
+[<Fact>]
+let ``two imports claiming the same local name is an already-declared error`` () =
+    let linked =
+        linkAuto [ "main", "import a.f, b.f"; "a", "pub fun f() {\n    return 1\n}"; "b", "pub fun f() {\n    return 2\n}" ]
+    Assert.Contains("Variable 'f' already declared.", errorsOf linked "main")
+
+[<Fact>]
+let ``an import colliding with a prelude name is an already-declared error`` () =
+    let linked = linkAuto [ "main", "import dep.map"; "dep", "pub fun map() {\n    return 1\n}" ]
+    Assert.Contains("Variable 'map' already declared.", errorsOf linked "main")
+
+[<Fact>]
+let ``an imported variable is read-only even if the exporter declared it mut`` () =
+    let linked =
+        linkAuto [ "main", "import dep.counter\ncounter = 5"; "dep", "pub var counter mut = 0" ]
+    Assert.Contains("Assigning to immutable variable 'counter' not allowed.", errorsOf linked "main")
+
+[<Fact>]
+let ``a subclass can extend an imported class and use its inherited properties`` () =
+    let shapes = "pub class Shape {\n    var sides pub mut\n    init(n) {\n        self.sides = n\n    }\n}"
+    let main = "import shapes.Shape\nclass Sq extends Shape {\n    init() {\n        self.sides = 4\n    }\n}\nSq()"
+    let linked = linkAuto [ "main", main; "shapes", shapes ]
+    Assert.Empty(errorsOf linked "main")
+    Assert.Contains("shapes::Shape", globalRefs linked |> List.append [ "shapes::Shape" ])
+    let superclasses =
+        linked.Bound |> List.choose (function BClassStmt(_, n, Some(GlobalBinding s, _), _, _, _) when n.Lexeme = "Sq" -> Some s | _ -> None)
+    Assert.Equal<string list>([ "shapes::Shape" ], superclasses)
+
+[<Fact>]
+let ``a subclass of an imported class still can't assign an undeclared property`` () =
+    let shapes = "pub class Shape {\n    var sides pub mut\n}"
+    let main = "import shapes.Shape\nclass Sq extends Shape {\n    init() {\n        self.nope = 4\n    }\n}"
+    let linked = linkAuto [ "main", main; "shapes", shapes ]
+    Assert.Single(errorsOf linked "main") |> ignore
+
+[<Fact>]
+let ``an imported trait can be used by a class in the importing module`` () =
+    let named = "pub trait Named {\n    var label pub mut\n    pub describe() {\n        return self.label\n    }\n}"
+    let main = "import named.Named\nclass C {\n    use Named\n    init() {\n        self.label = 1\n    }\n}\nC()"
+    let linked = linkAuto [ "main", main; "named", named ]
+    Assert.Empty(errorsOf linked "main")
+    let _, codegenErrors = compile linked.Bound
+    Assert.Empty codegenErrors
+
+[<Fact>]
+let ``a pub declaration is never warned unused in its own module but a private one is`` () =
+    let linked = linkAuto [ "main", "import dep.a\nprint a()"; "dep", "pub fun a() {\n    return 1\n}\nfun b() {\n    return 2\n}" ]
+    match warningsOf linked "dep" with
+    | [ msg ] -> Assert.Contains("'b'", msg)
+    | other -> failwith $"unexpected: %A{other}"
+
+[<Fact>]
+let ``import below the top level is an error`` () =
+    let linked = linkAuto [ "main", "fun f() {\n    import dep.x\n}\nf()"; "dep", "pub var x = 1" ]
+    Assert.Contains("'import' is only allowed at the top level of a file.", errorsOf linked "main")
+
+[<Fact>]
+let ``pub below the top level is an error`` () =
+    let linked = linkAuto [ "main", "fun f() {\n    pub var x = 1\n}\nf()" ]
+    Assert.Contains("'pub' is only allowed on top-level declarations.", errorsOf linked "main")
+
+[<Fact>]
+let ``resolving a file with an import in isolation, without the linker, is an error`` () =
+    let _, errors, _ = resolve (parseText "import dep.x")
+    Assert.Single errors |> ignore
+
+[<Fact>]
+let ``a transitive import chain links and compiles`` () =
+    let linked =
+        linkAuto
+            [ "main", "import b.g\nprint g()"
+              "b", "import a.f\npub fun g() {\n    return f()\n}"
+              "a", "pub fun f() {\n    return 1\n}" ]
+    Assert.All(linked.Diagnostics, fun d -> Assert.Empty d.Errors)
     let _, codegenErrors = compile linked.Bound
     Assert.Empty codegenErrors
