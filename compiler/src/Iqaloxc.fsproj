@@ -12,6 +12,7 @@
     <Compile Include="Parser.fs" />
     <Compile Include="Bound.fs" />
     <Compile Include="Resolver.fs" />
+    <Compile Include="Modules.fs" />
     <Compile Include="Bytecode.fs" />
     <Compile Include="Disassembler.fs" />
     <Compile Include="Codegen.fs" />
