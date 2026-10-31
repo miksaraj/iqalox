@@ -1,0 +1,19 @@
+<#
+    A module: this file's name relative to the entry file's directory,
+    dotted, is its module name (`math/vector.iqx` -> `math.vector`).
+    Only top-level declarations marked `pub` can be imported from
+    another file; everything else stays private to this one.
+#>
+
+var offset = 100
+
+# Private: not importable, but `double` below can still use it.
+fun shifted(n) {
+    return n + offset
+}
+
+pub fun double(n) {
+    return shifted(n) - offset + n
+}
+
+pub var origin = [0, 0]

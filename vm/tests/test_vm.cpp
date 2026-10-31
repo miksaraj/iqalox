@@ -1630,3 +1630,73 @@ TEST_CASE("calling print with the wrong argument count is a runtime error", "[vm
 
     REQUIRE_THROWS_AS(vm.interpret(b.build()), RuntimeError);
 }
+
+TEST_CASE("a runtime error names the source file when the program has a file table", "[vm]") {
+    Vm vm;
+    vm.sourceFiles = {"main.iqx", "math/vector.iqx"};
+    ChunkBuilder b(vm);
+    uint16_t one = b.addNumberConstant(1);
+    uint16_t zero = b.addNumberConstant(0);
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::Constant, zero);
+    b.emit(OpCode::Divide);  // byte 6
+
+    auto* fn = b.build();
+    fn->chunk.lines.assign(fn->chunk.code.size(), 1);
+    fn->chunk.lines[6] = 7;
+    fn->chunk.files.assign(fn->chunk.code.size(), 0);
+    fn->chunk.files[6] = 1;  // the faulting Divide came from the second file
+
+    try {
+        vm.interpret(fn);
+        FAIL("expected a RuntimeError");
+    } catch (const RuntimeError& error) {
+        REQUIRE(std::string(error.what()).find("[math/vector.iqx, line 7]") != std::string::npos);
+    }
+}
+
+TEST_CASE("an empty file name falls back to a bare line number", "[vm]") {
+    Vm vm;
+    vm.sourceFiles = {""};
+    ChunkBuilder b(vm);
+    uint16_t one = b.addNumberConstant(1);
+    uint16_t zero = b.addNumberConstant(0);
+    b.emitU16(OpCode::Constant, one);
+    b.emitU16(OpCode::Constant, zero);
+    b.emit(OpCode::Divide);
+
+    auto* fn = b.build();
+    fn->chunk.lines.assign(fn->chunk.code.size(), 9);
+    fn->chunk.files.assign(fn->chunk.code.size(), 0);
+
+    try {
+        vm.interpret(fn);
+        FAIL("expected a RuntimeError");
+    } catch (const RuntimeError& error) {
+        REQUIRE(std::string(error.what()).find("[line 9]") != std::string::npos);
+    }
+}
+
+TEST_CASE("a type-check fault (non-number operand) also reports its source location", "[vm]") {
+    // These used to be thrown as bare RuntimeErrors with no `[line N]` at all.
+    Vm vm;
+    vm.sourceFiles = {"main.iqx"};
+    ChunkBuilder b(vm);
+    uint16_t one = b.addNumberConstant(1);
+    b.emitU16(OpCode::Constant, one);
+    b.emit(OpCode::Nil);
+    b.emit(OpCode::Subtract);  // byte 4: number - nil
+
+    auto* fn = b.build();
+    fn->chunk.lines.assign(fn->chunk.code.size(), 3);
+    fn->chunk.files.assign(fn->chunk.code.size(), 0);
+
+    try {
+        vm.interpret(fn);
+        FAIL("expected a RuntimeError");
+    } catch (const RuntimeError& error) {
+        std::string what = error.what();
+        REQUIRE(what.find("Operands must be numbers.") != std::string::npos);
+        REQUIRE(what.find("[main.iqx, line 3]") != std::string::npos);
+    }
+}

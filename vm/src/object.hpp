@@ -74,6 +74,10 @@ struct Chunk {
     // `compiler/src/Bytecode.fs`'s doc comment for the on-disk layout this
     // mirrors, and `Vm::runtimeError` for the lookup itself.
     std::vector<uint16_t> lines;
+    // `files[i]` indexes `Vm::sourceFiles` for the source file `code[i]`
+    // came from -- same one-entry-per-byte shape as `lines`. May be empty
+    // (a hand-built chunk); `Vm::runtimeError` then reports a bare line.
+    std::vector<uint16_t> files;
 };
 
 struct ObjFunction : Obj {

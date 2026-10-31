@@ -1,0 +1,21 @@
+<#
+    Classes and traits are exported the same way as functions and
+    variables: prefix the declaration with `pub`.
+#>
+
+pub trait Named {
+    var label pub mut
+    pub describe() {
+        return self.label
+    }
+}
+
+pub class Shape {
+    var sides pub mut
+    init(n) {
+        self.sides = n
+    }
+    pub area() {
+        return 0
+    }
+}

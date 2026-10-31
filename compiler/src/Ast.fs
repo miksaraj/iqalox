@@ -92,6 +92,12 @@ type FunctionDecl = { Name: Token; Parameters: Token list; Body: Stmt list; IsPu
 /// set it first (decision 9).
 and PropertyDecl = { Name: Token; IsPub: bool; IsMutable: bool }
 
+/// One `a.b.name [as alias]` entry of an `import` statement
+/// (`docs/PLAN-0.3.md` decision 5): `Module` is every dotted segment but
+/// the last (`a.b`), `Name` is the member being imported (`name`), and
+/// `Alias`, when present, is the local name it's bound to instead.
+and ImportItem = { Module: Token list; Name: Token; Alias: Token option }
+
 and Stmt =
     | Block of statements: Stmt list
     | ExpressionStmt of expression: Expr
@@ -124,3 +130,11 @@ and Stmt =
     /// the statement list, so there's no `BTraitStmt`/opcode/runtime
     /// object anywhere below this.
     | TraitStmt of name: Token * properties: PropertyDecl list * methods: FunctionDecl list * usedTraits: Token list
+    /// `import a.b.name [as alias], ...` (`docs/PLAN-0.3.md` decision 5).
+    /// Only meaningful at the top level of a file; consumed entirely by the
+    /// module linker (`Modules.fs`) and never reaches `Bound.fs`.
+    | ImportStmt of keyword: Token * items: ImportItem list
+    /// `pub fun`/`pub var`/`pub class`/`pub trait` at the top level
+    /// (decision 6) -- wraps the declaration it exports. The resolver
+    /// unwraps it up front; a `pub` anywhere but the top level is an error.
+    | PubStmt of keyword: Token * declaration: Stmt

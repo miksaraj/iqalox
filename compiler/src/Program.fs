@@ -24,9 +24,8 @@ open Iqalox.Modules
 open Iqalox.Codegen
 open Iqalox.Bytecode
 
-/// Scans and parses one module file. Phase 4 (`docs/PLAN-0.3.md`) has no
-/// `import` statement yet, so every file reports no dependencies; Phase 5
-/// will read them out of the AST here. Errors come back as ready-to-print
+/// Scans and parses one module file, reporting the modules its top-level
+/// `import`s depend on (`docs/PLAN-0.3.md` Phase 5). Errors come back as ready-to-print
 /// lines: the entry file keeps the original `[line N]` format, every
 /// other module is attributed to its own module name.
 let private parseModule (entryFull: string) (moduleName: string) (path: string) : Result<Ast.Stmt list * string list, string list> =
@@ -45,7 +44,7 @@ let private parseModule (entryFull: string) (moduleName: string) (path: string) 
             if not parseErrors.IsEmpty then
                 Error [ for e in parseErrors -> $"{label e.Token.Line} Error: {e.Message}" ]
             else
-                Ok(stmts, [])
+                Ok(stmts, importedModuleNames stmts)
 
 [<EntryPoint>]
 let main argv =
@@ -68,7 +67,7 @@ let main argv =
                 // The prelude is resolved as its own unit, once, and its
                 // declared names seed every user module as ordinary
                 // immutable globals (`docs/PLAN-0.3.md` Phase 4).
-                let prelude = resolveUnit [] preludeStmts
+                let prelude = resolveUnit [] [] preludeStmts
 
                 if not prelude.Errors.IsEmpty then
                     for e in prelude.Errors do
@@ -107,14 +106,14 @@ let main argv =
                                     eprintfn "%s Error: %s" (label d e.Token.Line) e.Message
                             65
                         else
-                            let chunk, codegenErrors = compile linked.Bound
+                            let chunk, fileNames, codegenErrors = compileSegments linked.Segments
 
                             if not codegenErrors.IsEmpty then
                                 for e in codegenErrors do
                                     eprintfn "[line %d] Error: %s" e.Line e.Message
                                 65
                             else
-                                write chunk outputPath
+                                writeWithFiles fileNames chunk outputPath
                                 0
     | _ ->
         eprintfn "Usage: iqaloxc <input .iqx file> <output bytecode file>"

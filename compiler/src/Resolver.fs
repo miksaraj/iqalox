@@ -139,7 +139,7 @@ let private preRegisterGlobals
 /// name-keyed maps -- the unit `checkNoConflicts`/`overrideWith`/
 /// `mergeAll` below operate on, for `docs/PLAN-0.2.md` decision 12's
 /// compile-time composition (traits via `use`, mixins via `with`).
-type private MemberSet = { Properties: Map<string, PropertyDecl>; Methods: Map<string, FunctionDecl> }
+type MemberSet = { Properties: Map<string, PropertyDecl>; Methods: Map<string, FunctionDecl> }
 
 let private emptyMemberSet: MemberSet = { Properties = Map.empty; Methods = Map.empty }
 
@@ -231,7 +231,7 @@ let private buildOwnMemberSet
 /// exactly like `preRegisterClasses` does for classes. A trait has no
 /// `extends`/`with` of its own (`langspec/SYNTAX_GRAMMAR.md`'s
 /// `traitDecl` grammar), only possibly-nested `use` of other traits.
-type private TraitInfo =
+type TraitInfo =
     { Name: Token
       Properties: PropertyDecl list
       Methods: FunctionDecl list
@@ -301,7 +301,7 @@ let rec private flattenTrait
 /// own at all; only `SuperclassName`/`MixinNames` remain to walk for
 /// `effectiveClassMembers` below, since those two compose at *runtime*
 /// (`Inherit`/`Mixin`), not at compile time.
-type private ClassInfo =
+type ClassInfo =
     { Name: Token
       SuperclassName: string option
       MixinNames: string list
@@ -324,7 +324,13 @@ type private ClassInfo =
       /// `Resolver.fs`'s `ClassStmt` case resolves as this class's own
       /// properties/methods, needing no further `use` handling at all.
       InlinedProperties: PropertyDecl list
-      InlinedMethods: FunctionDecl list }
+      InlinedMethods: FunctionDecl list
+      /// True for a class brought in via `import` (`docs/PLAN-0.3.md`
+      /// Phase 5): its `OwnLiteral` is the exporter's already-computed
+      /// *effective* member set, standing in for the whole inheritance
+      /// chain, and it's never checked for unused members (those belong to
+      /// the module that declared it).
+      IsImported: bool }
 
 let private preRegisterClasses
     (classes: Dictionary<string, ClassInfo>)
@@ -380,7 +386,8 @@ let private preRegisterClasses
                   OwnLiteral = ownLiteral
                   TraitContributed = traitContributed
                   InlinedProperties = inlinedProperties
-                  InlinedMethods = inlinedMethods }
+                  InlinedMethods = inlinedMethods
+                  IsImported = false }
         | _ -> ()
 
 /// Recursively computes class `className`'s full effective member set --
@@ -489,10 +496,15 @@ let private findDeclaredMethod (effectiveMembers: Dictionary<string, MemberSet>)
     | true, m -> m.Methods.ContainsKey methodName
     | false, _ -> false
 
+/// `_`-prefixed names are exempt from every unused check (`docs/PLAN-0.3.md`
+/// decision 4, open question 3).
+let private isExemptFromUnusedCheckName (lexeme: string) = lexeme.StartsWith "_"
+
 type private Resolver
     (
         globals: Dictionary<string, bool>,
         globalDecls: Dictionary<string, Token * string>,
+        aliases: Dictionary<string, string>,
         classes: Dictionary<string, ClassInfo>,
         effectiveMembers: Dictionary<string, MemberSet>
     ) =
@@ -570,7 +582,14 @@ type private Resolver
                 | true, isMutable ->
                     if markUsed then
                         usedGlobalNames.Add name |> ignore
-                    GlobalBinding name, Some isMutable
+                    // An imported name binds to the exporting module's
+                    // qualified global, not to its local (possibly aliased)
+                    // spelling (`docs/PLAN-0.3.md` Phase 5).
+                    let target =
+                        match aliases.TryGetValue name with
+                        | true, qualified -> qualified
+                        | false, _ -> name
+                    GlobalBinding target, Some isMutable
                 | false, _ -> GlobalBinding name, None
 
     let declareVariable (name: Token) (isMutable: bool) : DeclaredBinding =
@@ -594,6 +613,7 @@ type private Resolver
             DeclaredLocal slot
 
     member this.Errors = List.ofSeq errors
+    member this.WasGlobalRead(name: string) = usedGlobalNames.Contains name
     member this.Warnings = List.ofSeq warnings
 
     /// Warns on any non-`pub` property/method declared directly in a
@@ -608,7 +628,7 @@ type private Resolver
     /// name. Must run after every `ClassStmt`/method body in the program
     /// has been resolved, so `usedSelfNames` is fully populated first.
     member this.CheckUnusedClassMembers() =
-        for KeyValue(_, info) in classes do
+        for KeyValue(_, info) in classes |> Seq.filter (fun kv -> not kv.Value.IsImported) do
             for KeyValue(propName, prop) in info.OwnLiteral.Properties do
                 if not prop.IsPub && not (isExemptFromUnusedCheck propName) && not (usedSelfNames.Contains propName) then
                     warn prop.Name $"Property '{propName}' is never used."
@@ -733,6 +753,16 @@ type private Resolver
                 |> List.map (fun p -> ({ Name = p.Name; IsPub = p.IsPub; IsMutable = p.IsMutable }: BoundPropertyDecl))
 
             BClassStmt(binding, name, boundSuperclass, boundMixins, boundProperties, boundMethods)
+        | PubStmt(keyword, declaration) ->
+            // A top-level `pub` is unwrapped before resolution ever starts
+            // (`resolveInternal`), so reaching one here means it was nested.
+            error keyword "'pub' is only allowed on top-level declarations."
+            this.ResolveStmt declaration
+        | ImportStmt(keyword, _) ->
+            // Top-level imports are consumed by the module linker
+            // (`Modules.fs`) before this ever runs.
+            error keyword "'import' is only allowed at the top level of a file."
+            BBlock []
         | TraitStmt(name, _, _, _) ->
             // `resolve` filters every top-level `TraitStmt` out before
             // this ever runs (traits are pre-consumed entirely at compile
@@ -1037,44 +1067,122 @@ type private Resolver
 let private nativeGlobals =
     [ "print"; "concat"; "push"; "pop"; "length"; "reverse"; "transpose"; "multiply"; "add"; "subtract" ]
 
+/// What a `pub` top-level declaration exports (`docs/PLAN-0.3.md`
+/// decision 6). A class or trait exports the member set an importer needs
+/// to type-check `extends`/`with`/`use` and `self.x` against -- for a
+/// class its full *effective* set (own + inherited + mixed in), for a trait
+/// its fully flattened one -- since the exporter's own raw class/trait
+/// tables mean nothing in the importer's name space.
+type ExportKind =
+    | ExportVar
+    | ExportFun
+    | ExportClass of effective: MemberSet
+    | ExportTrait of flattened: MemberSet
+
+type ExportedSymbol = { Name: string; Kind: ExportKind }
+
+/// One name an `import` brings into a module: `Local` is the token for
+/// the name as spelled in the importing file (the alias if there is one),
+/// `Qualified` the exporting module's qualified global it refers to.
+type ImportBinding = { Local: Token; Qualified: string; Kind: ExportKind }
+
 /// The result of resolving one compilation unit (the prelude, or a single
 /// module's source file) in isolation. `DeclaredGlobals` is every
 /// top-level `var`/`fun`/`class` name the unit itself declared (never
-/// the natives or `rootGlobals` it was seeded with) -- `Modules.fs` uses
-/// it to qualify exactly those names when linking several units into one
-/// program (`docs/PLAN-0.3.md` Phase 4).
+/// the natives, `rootGlobals` or imports it was seeded with) -- `Modules.fs`
+/// uses it to qualify exactly those names when linking several units into
+/// one program (`docs/PLAN-0.3.md` Phase 4). `Exports` is what the unit's
+/// `pub` declarations offer to importers (Phase 5).
 type ResolvedUnit =
     { Bound: BoundStmt list
       Errors: ResolveError list
       Warnings: ResolveError list
-      DeclaredGlobals: Set<string> }
+      DeclaredGlobals: Set<string>
+      Exports: ExportedSymbol list }
 
 /// Shared implementation behind `resolve`/`resolveWithExemptGlobals`/
 /// `resolveUnit` below. `rootGlobals` are extra immutable global names
 /// pre-seeded exactly like `nativeGlobals` (declared by some *other*
 /// unit, typically the prelude, that this unit may reference but did not
 /// itself declare -- so redeclaring one is the same "already declared"
-/// error, and none are ever checked for unused-ness here).
+/// error, and none are ever checked for unused-ness here). `imports` are
+/// the already-validated names this unit's `import` statements bring in
+/// (`linked` says whether a module linker is driving this call: without
+/// one, a top-level `import` can't be satisfied and is an error).
 let private resolveInternal
+    (linked: bool)
     (rootGlobals: string list)
+    (imports: ImportBinding list)
     (stmts: Stmt list)
     (exemptGlobalNames: Set<string>)
     : ResolvedUnit =
+    // Unwrap every top-level `pub`, remembering which names it exported,
+    // and set aside `import`s (the linker already consumed them).
+    let exportedNames = ResizeArray<string>()
+    let preErrors = ResizeArray<ResolveError>()
+    let declaredName (stmt: Stmt) =
+        match stmt with
+        | VarStmt(name, _, _) -> Some name.Lexeme
+        | FunctionStmt decl -> Some decl.Name.Lexeme
+        | ClassStmt(name, _, _, _, _, _) -> Some name.Lexeme
+        | TraitStmt(name, _, _, _) -> Some name.Lexeme
+        | _ -> None
+    let stmts =
+        stmts
+        |> List.choose (fun stmt ->
+            match stmt with
+            | PubStmt(_, inner) ->
+                declaredName inner |> Option.iter exportedNames.Add
+                Some inner
+            | ImportStmt(keyword, _) ->
+                if not linked then
+                    preErrors.Add { Message = "'import' needs the module linker; it can't be resolved in isolation."; Token = keyword }
+                None
+            | other -> Some other)
+
     let globals = Dictionary<string, bool>()
     for name in nativeGlobals do
         globals.[name] <- false
     for name in rootGlobals do
         globals.[name] <- false
+
+    let aliases = Dictionary<string, string>()
+    let traits = Dictionary<string, TraitInfo>()
+    let classes = Dictionary<string, ClassInfo>()
+    for import in imports do
+        let local = import.Local.Lexeme
+        if globals.ContainsKey local then
+            preErrors.Add { Message = $"Variable '{local}' already declared."; Token = import.Local }
+        else
+            globals.[local] <- false // imports are read-only bindings
+            aliases.[local] <- import.Qualified
+            match import.Kind with
+            | ExportClass effective ->
+                classes.[local] <-
+                    { Name = import.Local
+                      SuperclassName = None
+                      MixinNames = []
+                      OwnLiteral = effective
+                      TraitContributed = emptyMemberSet
+                      InlinedProperties = []
+                      InlinedMethods = []
+                      IsImported = true }
+            | ExportTrait flattened ->
+                traits.[local] <-
+                    { Name = import.Local
+                      Properties = flattened.Properties |> Map.toList |> List.map snd
+                      Methods = flattened.Methods |> Map.toList |> List.map snd
+                      UsedTraitNames = [] }
+            | ExportVar
+            | ExportFun -> ()
+
     let seeded = Set.ofSeq globals.Keys
     let globalDecls = Dictionary<string, Token * string>()
-    let preErrors = ResizeArray<ResolveError>()
     preRegisterGlobals globals globalDecls preErrors stmts
 
-    let traits = Dictionary<string, TraitInfo>()
     preRegisterTraits traits preErrors stmts
     let traitCache = Dictionary<string, MemberSet>()
 
-    let classes = Dictionary<string, ClassInfo>()
     preRegisterClasses classes traits traitCache preErrors stmts
     let effectiveMembers = computeAllEffectiveClassMembers classes preErrors
 
@@ -1086,18 +1194,64 @@ let private resolveInternal
     // error instead of silently vanishing.
     let nonTraitStmts = stmts |> List.filter (function TraitStmt _ -> false | _ -> true)
 
-    let resolver = Resolver(globals, globalDecls, classes, effectiveMembers)
+    let resolver = Resolver(globals, globalDecls, aliases, classes, effectiveMembers)
     let bound = nonTraitStmts |> List.map resolver.ResolveStmt
     // Both must run after every top-level/class/method body above has
     // resolved, so `usedSelfNames`/`usedGlobalNames` (populated along the
     // way) are complete before checking them.
     resolver.CheckUnusedClassMembers()
-    resolver.CheckUnusedGlobals(exemptGlobalNames)
+    // A `pub` declaration is part of the module's public surface, used or
+    // not within this file -- same reasoning as `pub` class members.
+    resolver.CheckUnusedGlobals(Set.union exemptGlobalNames (Set.ofSeq exportedNames))
+
+    // An import is "used" if the name is ever read -- including as an
+    // `extends`/`with` operand, which resolves through `resolveReference`
+    // like any other read -- or named by a `use` clause (trait use is
+    // inlined at compile time and never goes through `resolveReference`).
+    let usedTraitNames =
+        stmts
+        |> List.collect (function
+            | ClassStmt(_, _, _, _, _, used) -> used
+            | TraitStmt(_, _, _, used) -> used
+            | _ -> [])
+        |> List.map (fun t -> t.Lexeme)
+        |> Set.ofList
+    let unusedImportWarnings =
+        [ for import in imports do
+            let local = import.Local.Lexeme
+            if
+                not (isExemptFromUnusedCheckName local)
+                && not (resolver.WasGlobalRead local)
+                && not (usedTraitNames.Contains local)
+            then
+                yield { Message = $"Import '{local}' is never used."; Token = import.Local } ]
+
+    let exports =
+        [ for name in exportedNames |> Seq.distinct do
+            let kind =
+                stmts
+                |> List.tryPick (fun stmt ->
+                    match stmt with
+                    | VarStmt(n, _, _) when n.Lexeme = name -> Some ExportVar
+                    | FunctionStmt d when d.Name.Lexeme = name -> Some ExportFun
+                    | ClassStmt(n, _, _, _, _, _) when n.Lexeme = name ->
+                        match effectiveMembers.TryGetValue name with
+                        | true, members -> Some(ExportClass members)
+                        | false, _ -> None
+                    | TraitStmt(n, _, _, _) when n.Lexeme = name ->
+                        // Re-flattened against throwaway error/cache sinks:
+                        // any real conflict was already reported above.
+                        Some(ExportTrait(flattenTrait traits (ResizeArray()) (Dictionary()) Set.empty n name))
+                    | _ -> None)
+            match kind with
+            | Some k -> yield { Name = name; Kind = k }
+            | None -> () ]
 
     { Bound = bound
       Errors = (List.ofSeq preErrors) @ resolver.Errors
-      Warnings = resolver.Warnings
-      DeclaredGlobals = globals.Keys |> Seq.filter (fun k -> not (seeded.Contains k)) |> Set.ofSeq }
+      Warnings = resolver.Warnings @ unusedImportWarnings
+      DeclaredGlobals = globals.Keys |> Seq.filter (fun k -> not (seeded.Contains k)) |> Set.ofSeq
+      Exports = exports }
 
 let private asTuple (r: ResolvedUnit) = r.Bound, r.Errors, r.Warnings
 
@@ -1110,17 +1264,18 @@ let private asTuple (r: ResolvedUnit) = r.Bound, r.Errors, r.Warnings
 /// resolution continues, since (unlike a syntax error) a semantic error
 /// doesn't prevent understanding the rest of the program's structure.
 let resolve (stmts: Stmt list) : BoundStmt list * ResolveError list * ResolveError list =
-    resolveInternal [] stmts Set.empty |> asTuple
+    resolveInternal false [] [] stmts Set.empty |> asTuple
 
 /// Like `resolve`, but never warns about an unused top-level `var`/`fun`
 /// whose name is in `exemptGlobalNames`, regardless of whether the
 /// program actually reads it (used where the prelude is still textually
 /// merged into the same unit as user code).
 let resolveWithExemptGlobals (stmts: Stmt list) (exemptGlobalNames: Set<string>) : BoundStmt list * ResolveError list * ResolveError list =
-    resolveInternal [] stmts exemptGlobalNames |> asTuple
+    resolveInternal false [] [] stmts exemptGlobalNames |> asTuple
 
-/// Resolves one compilation unit in isolation (`docs/PLAN-0.3.md` Phase
-/// 4): `rootGlobals` are names another unit (the prelude) declares that
-/// this one may reference as ordinary immutable globals.
-let resolveUnit (rootGlobals: string list) (stmts: Stmt list) : ResolvedUnit =
-    resolveInternal rootGlobals stmts Set.empty
+/// Resolves one compilation unit in isolation (`docs/PLAN-0.3.md` Phases
+/// 4-5): `rootGlobals` are names another unit (the prelude) declares that
+/// this one may reference as ordinary immutable globals, and `imports` are
+/// the names its `import` statements bring in.
+let resolveUnit (rootGlobals: string list) (imports: ImportBinding list) (stmts: Stmt list) : ResolvedUnit =
+    resolveInternal true rootGlobals imports stmts Set.empty

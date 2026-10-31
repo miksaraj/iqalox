@@ -49,7 +49,10 @@ std::filesystem::path writeTempFile(const std::vector<uint8_t>& bytes) {
     return path;
 }
 
-std::vector<uint8_t> header() { return {'I', 'Q', 'B', 'C', bytecode::kFormatVersion}; }
+std::vector<uint8_t> header() {
+    // magic, version, then an empty (u16 count = 0) source-file table
+    return {'I', 'Q', 'B', 'C', bytecode::kFormatVersion, 0, 0};
+}
 
 struct TempFile {
     std::filesystem::path path;
@@ -87,6 +90,9 @@ TEST_CASE("number and string constants decode to their runtime Values", "[byteco
     for (size_t i = 0; i < code.size(); ++i) {
         pushU16(bytes, 1);  // one line entry per code byte
     }
+    for (size_t i = 0; i < code.size(); ++i) {
+        pushU16(bytes, 0);  // one file entry per code byte
+    }
     TempFile file(bytes);
 
     Vm vm;
@@ -116,6 +122,7 @@ TEST_CASE("a nested FunctionConstant decodes its name/arity/locals/upvalues and 
     pushU32(bytes, 1);
     bytes.push_back(0x23);
     pushU16(bytes, 5);  // RETURN's line
+    pushU16(bytes, 0);  // RETURN's file
 
     pushU32(bytes, 0);  // top-level code_length
     TempFile file(bytes);
@@ -173,4 +180,26 @@ TEST_CASE("an unknown constant tag is rejected", "[bytecode]") {
 
     Vm vm;
     REQUIRE_THROWS_AS(bytecode::load(file.path, vm), std::runtime_error);
+}
+
+TEST_CASE("the source-file table and a chunk's per-byte file indices load", "[bytecode]") {
+    std::vector<uint8_t> bytes{'I', 'Q', 'B', 'C', bytecode::kFormatVersion};
+    pushU16(bytes, 2);  // file_count
+    pushString(bytes, "main.iqx");
+    pushString(bytes, "math/vector.iqx");
+    pushU32(bytes, 0);  // constant_count
+    std::vector<uint8_t> code{0x02, 0x23};  // NIL, RETURN
+    pushU32(bytes, static_cast<uint32_t>(code.size()));
+    bytes.insert(bytes.end(), code.begin(), code.end());
+    pushU16(bytes, 3);  // lines
+    pushU16(bytes, 4);
+    pushU16(bytes, 0);  // files: NIL in file 0, RETURN in file 1
+    pushU16(bytes, 1);
+    TempFile file(bytes);
+
+    Vm vm;
+    ObjFunction* script = bytecode::load(file.path, vm);
+
+    REQUIRE(vm.sourceFiles == std::vector<std::string>{"main.iqx", "math/vector.iqx"});
+    REQUIRE(script->chunk.files == std::vector<uint16_t>{0, 1});
 }

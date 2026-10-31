@@ -94,9 +94,19 @@ void Vm::runtimeError(const std::string& message) {
         throw RuntimeError(message);
     }
     const CallFrame& frame = frames.back();
-    const auto& lines = frame.closure->function->chunk.lines;
+    const auto& chunk = frame.closure->function->chunk;
+    const auto& lines = chunk.lines;
     if (frame.currentInstructionIp < lines.size()) {
-        throw RuntimeError(message + "\n[line " + std::to_string(lines[frame.currentInstructionIp]) + "]");
+        // `[file, line N]` when the faulting instruction's file is known,
+        // a bare `[line N]` otherwise (hand-built chunks, empty file name).
+        std::string where = "line " + std::to_string(lines[frame.currentInstructionIp]);
+        if (frame.currentInstructionIp < chunk.files.size()) {
+            uint16_t file = chunk.files[frame.currentInstructionIp];
+            if (file < sourceFiles.size() && !sourceFiles[file].empty()) {
+                where = sourceFiles[file] + ", " + where;
+            }
+        }
+        throw RuntimeError(message + "\n[" + where + "]");
     }
     throw RuntimeError(message);
 }
@@ -116,11 +126,11 @@ void Vm::checkPropertyNotUndef(const Value& value, const std::string& propName) 
 }
 
 void Vm::checkNumberOperand(const Value& value, const char* message) {
-    if (!isNumber(value)) throw RuntimeError(message);
+    if (!isNumber(value)) runtimeError(message);
 }
 
 void Vm::checkNumberOperands(const Value& a, const Value& b, const char* message) {
-    if (!isNumber(a) || !isNumber(b)) throw RuntimeError(message);
+    if (!isNumber(a) || !isNumber(b)) runtimeError(message);
 }
 
 size_t Vm::checkVectorIndex(const Value& receiver, const Value& indexValue) {
@@ -233,7 +243,16 @@ void Vm::callNative(ObjNativeFunction* native, int argCount) {
     // they are on `stack` -- still scanned as a GC root -- until
     // `truncateStack` removes them *after* the call returns.
     std::vector<Value> args(stack.end() - argCount, stack.end());
-    Value result = native->function(*this, args);
+    // A native reports a fault by throwing a bare `RuntimeError`, with no
+    // idea where in the user's program it was called from -- re-raised
+    // here through `runtimeError` so it carries the call site's
+    // `[file, line N]` like every other runtime fault.
+    Value result;
+    try {
+        result = native->function(*this, args);
+    } catch (const RuntimeError& error) {
+        runtimeError(error.what());
+    }
     truncateStack(stack.size() - static_cast<size_t>(argCount) - 1);
     push(result);
 }

@@ -27,7 +27,10 @@ open Iqalox.Ast
 open Iqalox.Bound
 open Iqalox.Resolver
 
-type ModuleSource = { Name: string; Path: string; Stmts: Stmt list }
+/// `File` is the module's path relative to the entry file's directory
+/// ("math/vector.iqx"), with `/` separators on every platform -- what
+/// runtime errors report (`Bytecode.fs`' file table).
+type ModuleSource = { Name: string; Path: string; File: string; Stmts: Stmt list }
 
 /// `math/vector.iqx` (relative to `rootDir`) -> `math.vector`.
 let moduleNameOfPath (rootDir: string) (filePath: string) : string =
@@ -74,7 +77,8 @@ let loadModules
             | Ok(stmts, imports) ->
                 for imported in imports do
                     visit (name :: stack) imported (modulePathOfName rootDir imported)
-                let source = { Name = name; Path = path; Stmts = stmts }
+                let file = Path.GetRelativePath(rootDir, Path.GetFullPath path).Replace('\\', '/')
+                let source = { Name = name; Path = path; File = file; Stmts = stmts }
                 finished.[name] <- source
                 order.Add source
 
@@ -160,28 +164,85 @@ type UnitDiagnostics =
       Errors: ResolveError list
       Warnings: ResolveError list }
 
-type LinkedProgram = { Bound: BoundStmt list; Diagnostics: UnitDiagnostics list }
+/// `Bound` is every statement in execution order; `Segments` is the same
+/// statements grouped by the source file each came from (the prelude is
+/// `"<prelude>"`), for `Codegen.compileSegments`.
+type LinkedProgram =
+    { Bound: BoundStmt list
+      Segments: (string * BoundStmt list) list
+      Diagnostics: UnitDiagnostics list }
+
+/// The dotted module names `stmts`' top-level `import` statements depend
+/// on, in first-mention order without repeats -- what `Program.fs`'s parse
+/// callback hands `loadModules` as a file's dependencies.
+let importedModuleNames (stmts: Stmt list) : string list =
+    stmts
+    |> List.collect (function
+        | ImportStmt(_, items) ->
+            items |> List.map (fun item -> item.Module |> List.map (fun t -> t.Lexeme) |> String.concat ".")
+        | _ -> [])
+    |> List.distinct
+
+/// Turns one module's `import` statements into validated bindings (or
+/// errors), looking each `a.b.name` up in the already-resolved module `a.b`.
+/// Dependency order guarantees every imported module is in `resolved`.
+let private bindImports
+    (resolved: Dictionary<string, ResolvedUnit>)
+    (stmts: Stmt list)
+    : ImportBinding list * ResolveError list =
+    let bindings = ResizeArray<ImportBinding>()
+    let errors = ResizeArray<ResolveError>()
+    for stmt in stmts do
+        match stmt with
+        | ImportStmt(_, items) ->
+            for item in items do
+                let moduleName = item.Module |> List.map (fun t -> t.Lexeme) |> String.concat "."
+                let memberName = item.Name.Lexeme
+                match resolved.TryGetValue moduleName with
+                | false, _ ->
+                    errors.Add { Message = $"Unknown module '{moduleName}'."; Token = item.Module.Head }
+                | true, exporter ->
+                    match exporter.Exports |> List.tryFind (fun e -> e.Name = memberName) with
+                    | Some symbol ->
+                        bindings.Add
+                            { Local = defaultArg item.Alias item.Name
+                              Qualified = qualifiedName moduleName memberName
+                              Kind = symbol.Kind }
+                    | None when exporter.DeclaredGlobals.Contains memberName ->
+                        errors.Add
+                            { Message = $"'{memberName}' in module '{moduleName}' is not 'pub', so it can't be imported."
+                              Token = item.Name }
+                    | None ->
+                        errors.Add { Message = $"Module '{moduleName}' has no top-level '{memberName}'."; Token = item.Name }
+        | _ -> ()
+    List.ofSeq bindings, List.ofSeq errors
 
 /// Resolves every module (each in isolation, seeded with the prelude's
-/// declared names as ordinary immutable root globals), qualifies every
-/// non-entry module's own globals, and concatenates the results:
-/// prelude first, then modules in dependency order, entry last -- the
-/// same top-to-bottom execution order the old textual prelude merge gave
-/// a single-file program. `modules` must be in `loadModules`' order (entry
-/// last).
+/// declared names as ordinary immutable root globals and with whatever
+/// its own `import`s bring in from already-resolved dependencies),
+/// qualifies every non-entry module's own globals, and concatenates the
+/// results: prelude first, then modules in dependency order, entry last --
+/// the same top-to-bottom execution order the old textual prelude merge
+/// gave a single-file program. `modules` must be in `loadModules`' order
+/// (entry last).
 let linkModules (prelude: ResolvedUnit) (modules: ModuleSource list) : LinkedProgram =
     let rootGlobals = Set.toList prelude.DeclaredGlobals
     let lastIndex = List.length modules - 1
+    let resolvedByName = Dictionary<string, ResolvedUnit>()
     let resolved =
         modules
         |> List.mapi (fun i m ->
-            let unit = resolveUnit rootGlobals m.Stmts
+            let imports, importErrors = bindImports resolvedByName m.Stmts
+            let unit = resolveUnit rootGlobals imports m.Stmts
+            resolvedByName.[m.Name] <- unit
             let isEntry = (i = lastIndex)
             let bound = if isEntry then unit.Bound else qualifyModule m.Name unit.DeclaredGlobals unit.Bound
-            bound,
+            (m.File, bound),
             { Module = m.Name
               IsEntry = isEntry
-              Errors = unit.Errors
+              Errors = importErrors @ unit.Errors
               Warnings = unit.Warnings })
-    { Bound = prelude.Bound @ (resolved |> List.collect fst)
+    let segments = ("<prelude>", prelude.Bound) :: (resolved |> List.map fst)
+    { Bound = segments |> List.collect snd
+      Segments = segments
       Diagnostics = resolved |> List.map snd }

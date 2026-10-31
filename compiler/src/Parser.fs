@@ -198,7 +198,9 @@ type private ParserState(tokens: Token[]) =
 
     member this.Declaration() : Stmt option =
         try
-            if matchAny [ Class ] then Some(this.ClassDeclaration())
+            if matchAny [ Pub ] then Some(this.PubDeclaration())
+            elif matchAny [ Import ] then Some(this.ImportDeclaration())
+            elif matchAny [ Class ] then Some(this.ClassDeclaration())
             elif matchAny [ Trait ] then Some(this.TraitDeclaration())
             elif matchAny [ Fun ] then Some(FunctionStmt(this.FunctionDeclaration("function", isPub = false)))
             elif matchAny [ Var ] then Some(this.VarDeclaration())
@@ -206,6 +208,50 @@ type private ParserState(tokens: Token[]) =
         with ParseFailure _ ->
             this.Synchronize()
             None
+
+    /// `pub` followed by `fun`/`var`/`class`/`trait` (`docs/PLAN-0.3.md`
+    /// decision 6; prefix position per the repository owner).
+    member this.PubDeclaration() : Stmt =
+        let keyword = previous ()
+
+        let declaration =
+            if matchAny [ Fun ] then FunctionStmt(this.FunctionDeclaration("function", isPub = false))
+            elif matchAny [ Var ] then this.VarDeclaration()
+            elif matchAny [ Class ] then this.ClassDeclaration()
+            elif matchAny [ Trait ] then this.TraitDeclaration()
+            else error (peek ()) "Expect 'fun', 'var', 'class' or 'trait' after 'pub'."
+
+        PubStmt(keyword, declaration)
+
+    /// `import a.b.name [as alias] (, a.b.name [as alias])*`
+    /// (`docs/PLAN-0.3.md` decision 5). The last dotted segment is the
+    /// imported member; everything before it is the module path.
+    member this.ImportDeclaration() : Stmt =
+        let keyword = previous ()
+        let items = ResizeArray<ImportItem>()
+        let mutable more = true
+
+        while more do
+            let segments = ResizeArray<Token>()
+            segments.Add(consume Identifier "Expect module path after 'import'.")
+            while matchAny [ Dot ] do
+                segments.Add(consume Identifier "Expect identifier after '.' in import path.")
+
+            if segments.Count < 2 then
+                error segments.[0] "An import needs a module path and a name, e.g. 'import math.vector.transpose'."
+
+            let alias =
+                if matchAny [ As ] then Some(consume Identifier "Expect alias name after 'as'.") else None
+
+            items.Add
+                { Module = segments |> Seq.take (segments.Count - 1) |> List.ofSeq
+                  Name = segments.[segments.Count - 1]
+                  Alias = alias }
+
+            more <- matchAny [ Comma ]
+
+        consume Semicolon "Expect line break or ';' after import." |> ignore
+        ImportStmt(keyword, List.ofSeq items)
 
     member this.ClassDeclaration() : Stmt =
         let name = consume Identifier "Expect class name."

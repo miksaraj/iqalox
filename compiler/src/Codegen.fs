@@ -188,6 +188,7 @@ type private LoopContext =
 type private FunctionState(initialStackDepth: int) =
     let instructions = ResizeArray<Instruction>()
     let lines = ResizeArray<int>()
+    let files = ResizeArray<int>()
     let constants = ResizeArray<Constant>()
 
     member val StackDepth = initialStackDepth with get, set
@@ -198,12 +199,16 @@ type private FunctionState(initialStackDepth: int) =
     /// instruction, so a token-less case (a literal, `_`) just inherits
     /// whatever line was already current.
     member val CurrentLine = 0 with get, set
+    /// Index into the program's file table of the source file the next
+    /// emitted instruction belongs to (see `Codegen.CompileSegments`).
+    member val CurrentFile = 0 with get, set
 
     member _.Here = instructions.Count
 
     member this.Emit(instr: Instruction) : int =
         instructions.Add instr
         lines.Add this.CurrentLine
+        files.Add this.CurrentFile
         this.StackDepth <- this.StackDepth + stackEffect instr
         instructions.Count - 1
 
@@ -240,11 +245,18 @@ type private FunctionState(initialStackDepth: int) =
     member _.ToChunk() : Chunk =
         { Constants = constants.ToArray()
           Code = instructions.ToArray()
-          Lines = lines.ToArray() }
+          Lines = lines.ToArray()
+          Files = files.ToArray() }
 
 type private Codegen() =
     let errors = ResizeArray<CodegenError>()
     let mutable state = FunctionState(0)
+    // The program's source-file table (`Bytecode.fs`' "files"), and the
+    // index of the file whose statements are being compiled right now --
+    // a nested function is always entirely inside one file, so it just
+    // inherits this when its own `FunctionState` is created.
+    let fileNames = ResizeArray<string>()
+    let mutable currentFile = 0
 
     let error (message: string) =
         errors.Add { Message = message; Line = state.CurrentLine }
@@ -530,6 +542,7 @@ type private Codegen() =
         let enclosing = state
         let initialDepth = List.length decl.Parameters + (if isMethod then 1 else 0)
         state <- FunctionState(initialDepth)
+        state.CurrentFile <- currentFile
 
         for s in decl.Body do
             this.CompileStmt s
@@ -696,9 +709,26 @@ type private Codegen() =
         // converge here at the loop's pre-initializer depth.
         state.StackDepth <- snapshot
 
+    member this.FileNames = fileNames.ToArray()
+
     member this.CompileProgram(stmts: BoundStmt list) : Chunk =
-        for stmt in stmts do
-            this.CompileStmt stmt
+        this.CompileSegments [ "", stmts ]
+
+    /// Compiles a program made of several source files' statements,
+    /// back to back in the order given (`docs/PLAN-0.3.md` Phases 4-5),
+    /// stamping every instruction with the file its statement came from.
+    member this.CompileSegments(segments: (string * BoundStmt list) list) : Chunk =
+        for (file, stmts) in segments do
+            let index =
+                match fileNames.IndexOf file with
+                | -1 ->
+                    fileNames.Add file
+                    fileNames.Count - 1
+                | existing -> existing
+            currentFile <- index
+            state.CurrentFile <- index
+            for stmt in stmts do
+                this.CompileStmt stmt
         state.Emit Nil |> ignore
         state.Emit Return |> ignore
         state.ToChunk()
@@ -711,3 +741,14 @@ let compile (stmts: BoundStmt list) : Chunk * CodegenError list =
     let codegen = Codegen()
     let chunk = codegen.CompileProgram stmts
     chunk, codegen.Errors
+
+/// Like `compile`, for a program assembled from several source files:
+/// `segments` pairs each file's name with its resolved statements (in
+/// execution order), and the result also carries the file table to hand
+/// `Bytecode.writeWithFiles`. An instruction's file is whichever segment
+/// its statement came from; the top-level epilogue is attributed to the
+/// last one.
+let compileSegments (segments: (string * BoundStmt list) list) : Chunk * string[] * CodegenError list =
+    let codegen = Codegen()
+    let chunk = codegen.CompileSegments segments
+    chunk, codegen.FileNames, codegen.Errors
