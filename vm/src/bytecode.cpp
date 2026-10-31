@@ -127,6 +127,11 @@ Chunk readChunk(Reader& reader, Vm& vm) {
         chunk.lines.push_back(reader.readU16());
     }
 
+    chunk.files.reserve(codeLength);
+    for (uint32_t i = 0; i < codeLength; ++i) {
+        chunk.files.push_back(reader.readU16());
+    }
+
     return chunk;
 }
 
@@ -150,6 +155,17 @@ ObjFunction* load(const std::filesystem::path& path, Vm& vm) {
     uint8_t version = reader.readU8();
     if (version != kFormatVersion) {
         throw std::runtime_error("iqalox bytecode: unsupported format version " + std::to_string(version));
+    }
+
+    // The program-wide source-file table (format v3), referred to by index
+    // from every chunk's `files` -- kept on the Vm so a fault anywhere can
+    // name its file.
+    uint16_t fileCount = reader.readU16();
+    vm.sourceFiles.clear();
+    vm.sourceFiles.reserve(fileCount);
+    for (uint16_t i = 0; i < fileCount; ++i) {
+        uint32_t nameLength = reader.readU32();
+        vm.sourceFiles.push_back(reader.readString(nameLength));
     }
 
     auto* script = vm.allocate<ObjFunction>();

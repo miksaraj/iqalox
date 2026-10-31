@@ -27,7 +27,10 @@ open Iqalox.Ast
 open Iqalox.Bound
 open Iqalox.Resolver
 
-type ModuleSource = { Name: string; Path: string; Stmts: Stmt list }
+/// `File` is the module's path relative to the entry file's directory
+/// ("math/vector.iqx"), with `/` separators on every platform -- what
+/// runtime errors report (`Bytecode.fs`' file table).
+type ModuleSource = { Name: string; Path: string; File: string; Stmts: Stmt list }
 
 /// `math/vector.iqx` (relative to `rootDir`) -> `math.vector`.
 let moduleNameOfPath (rootDir: string) (filePath: string) : string =
@@ -74,7 +77,8 @@ let loadModules
             | Ok(stmts, imports) ->
                 for imported in imports do
                     visit (name :: stack) imported (modulePathOfName rootDir imported)
-                let source = { Name = name; Path = path; Stmts = stmts }
+                let file = Path.GetRelativePath(rootDir, Path.GetFullPath path).Replace('\\', '/')
+                let source = { Name = name; Path = path; File = file; Stmts = stmts }
                 finished.[name] <- source
                 order.Add source
 
@@ -160,7 +164,13 @@ type UnitDiagnostics =
       Errors: ResolveError list
       Warnings: ResolveError list }
 
-type LinkedProgram = { Bound: BoundStmt list; Diagnostics: UnitDiagnostics list }
+/// `Bound` is every statement in execution order; `Segments` is the same
+/// statements grouped by the source file each came from (the prelude is
+/// `"<prelude>"`), for `Codegen.compileSegments`.
+type LinkedProgram =
+    { Bound: BoundStmt list
+      Segments: (string * BoundStmt list) list
+      Diagnostics: UnitDiagnostics list }
 
 /// The dotted module names `stmts`' top-level `import` statements depend
 /// on, in first-mention order without repeats -- what `Program.fs`'s parse
@@ -227,10 +237,12 @@ let linkModules (prelude: ResolvedUnit) (modules: ModuleSource list) : LinkedPro
             resolvedByName.[m.Name] <- unit
             let isEntry = (i = lastIndex)
             let bound = if isEntry then unit.Bound else qualifyModule m.Name unit.DeclaredGlobals unit.Bound
-            bound,
+            (m.File, bound),
             { Module = m.Name
               IsEntry = isEntry
               Errors = importErrors @ unit.Errors
               Warnings = unit.Warnings })
-    { Bound = prelude.Bound @ (resolved |> List.collect fst)
+    let segments = ("<prelude>", prelude.Bound) :: (resolved |> List.map fst)
+    { Bound = segments |> List.collect snd
+      Segments = segments
       Diagnostics = resolved |> List.map snd }

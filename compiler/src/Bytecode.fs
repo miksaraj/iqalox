@@ -1,3 +1,9 @@
+/// Bytecode format v3 adds a source-FILE dimension to v2's line table (see
+/// "files" below): a multi-file program (`docs/PLAN-0.3.md` Phases 4-5)
+/// compiles to ONE chunk whose code came from several source files, so a
+/// bare `[line N]` was no longer enough to find the fault. Everything else
+/// is unchanged from v2.
+///
 /// Bytecode format v2: adds a per-instruction source-line table (§"lines"
 /// below) so a runtime fault can be blamed on a real `[line N]`, which v1
 /// (Phases 1-9) had no room for at all -- a real diagnostics gap found
@@ -21,8 +27,14 @@
 ///
 ///   offset  size  field
 ///   0       4     magic: 'I' 'Q' 'B' 'C'
-///   4       1     format version (0x02 for v2)
-///   5       <chunk>   the top-level "script" chunk (see below), treated
+///   4       1     format version (0x03 for v3)
+///   5       2     file_count (u16), then for each file a name (u32
+///                 length + UTF-8 bytes) -- the source files the program
+///                 was compiled from, referred to by index below. A name
+///                 is the file's path relative to the entry file's
+///                 directory ("math/vector.iqx"); an empty name means
+///                 "unknown", and the VM then reports a bare `[line N]`.
+///   ...     <chunk>   the top-level "script" chunk (see below), treated
 ///                     as an implicit zero-arity, zero-upvalue function
 ///
 ///   <chunk> serialization:
@@ -42,7 +54,10 @@
 ///           it means the VM can look up `lines[ip]` directly with no
 ///           opcode-width decoding of its own at load time, the same
 ///           tradeoff `clox` itself makes)
+///     N*2   files -- same shape as lines: one u16 per byte of the
+///           instruction stream, an index into the file table above
 ///
+
 ///   Instruction encoding: 1 opcode byte, then a fixed operand width
 ///   determined entirely by the opcode (no variable-width operands except
 ///   CLOSURE's trailing per-upvalue list, whose own length is always
@@ -59,7 +74,7 @@ open System.Text
 open Iqalox.Bound
 
 [<Literal>]
-let FormatVersion = 2uy
+let FormatVersion = 3uy
 
 type Instruction =
     | Constant of index: int
@@ -221,7 +236,14 @@ and FunctionProto =
 /// `Code.[i]` -- parallel to `Code`, one entry per structured instruction
 /// (not one per serialized byte; `write` expands it to the latter, since
 /// that's what a byte-offset-indexed VM needs -- see its own doc comment).
-and Chunk = { Constants: Constant[]; Code: Instruction[]; Lines: int[] }
+///
+/// `Files.[i]` is the index (into the program's file table, written once
+/// at the top of the file) of the source file `Code.[i]` came from.
+and Chunk =
+    { Constants: Constant[]
+      Code: Instruction[]
+      Lines: int[]
+      Files: int[] }
 
 let private opcodeOf =
     function
@@ -439,11 +461,26 @@ let rec private writeChunk (writer: BinaryWriter) (chunk: Chunk) : unit =
         for _ in 1 .. byteLength do
             writer.Write(uint16 chunk.Lines.[i])
 
+    // Same expansion for the per-instruction file index.
+    for i in 0 .. chunk.Code.Length - 1 do
+        let byteLength = instructionByteLength chunk.Code.[i]
+        for _ in 1 .. byteLength do
+            writer.Write(uint16 chunk.Files.[i])
+
 /// Serializes `chunk` (the top-level script) to `path` in bytecode format
-/// v2.
-let write (chunk: Chunk) (path: string) : unit =
+/// v3, with `fileNames` as the program's source-file table.
+let writeWithFiles (fileNames: string[]) (chunk: Chunk) (path: string) : unit =
     use stream = File.Open(path, FileMode.Create, FileAccess.Write)
     use writer = new BinaryWriter(stream)
     writer.Write(Encoding.ASCII.GetBytes("IQBC"))
     writer.Write(FormatVersion)
+    writer.Write(uint16 fileNames.Length)
+    for name in fileNames do
+        let bytes = Encoding.UTF8.GetBytes name
+        writer.Write(uint32 bytes.Length)
+        writer.Write(bytes)
     writeChunk writer chunk
+
+/// `writeWithFiles` with an empty file table (every error then reports a
+/// bare `[line N]`).
+let write (chunk: Chunk) (path: string) : unit = writeWithFiles [||] chunk path

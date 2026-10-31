@@ -1147,13 +1147,21 @@ recover from either kind:
   its first assignment, reassigning a non-`mut` property a second time,
   an out-of-range vector index, extending/mixing-in a non-class,
   external access to a non-`pub` member, calling a non-callable value.
-  `iqaloxvm` reports the message plus `[line N]` to stderr and exits with
-  status `70`, after whatever output was already produced. The line
-  comes from a per-instruction-byte line table the bytecode format
-  carries alongside the instructions themselves — every emitted
-  instruction is stamped with whichever source token `Codegen.fs` most
-  recently had in view, the same way `clox` stamps every byte it emits
-  with the parser's current line.
+  `iqaloxvm` reports the message plus `[file, line N]` to stderr and
+  exits with status `70`, after whatever output was already produced —
+  `file` is the faulting instruction's source file, relative to the
+  entry file's directory (`math/vector.iqx`; `main.iqx` for the entry
+  file itself; `<prelude>` for a fault inside the standard-library
+  functions written in Iqalox, [§13](#13-the-standard-library)). The
+  location comes from per-instruction-byte line and file tables the
+  bytecode format carries alongside the instructions themselves — every
+  emitted instruction is stamped with whichever source token
+  `Codegen.fs` most recently had in view, the same way `clox` stamps
+  every byte it emits with the parser's current line. Every runtime
+  fault carries one, including operand type errors and errors raised by
+  built-in functions (`pop` on an empty vector, ...). (Compile-time
+  messages are unchanged: `[line N]` for the entry file, and
+  `[module, line N]` for another module.)
 
 **Remaining, smaller gap versus `0.1-poc`**: `0.1-poc` additionally shows
 *which token* triggered the error (`Error at 'x': ...`) plus a caret-
@@ -1176,8 +1184,8 @@ compiles and runs exactly as before, they're printed to stderr as
 
 The only warning `0.3` produces is **unused-variable detection**: a
 declared local variable, function/lambda parameter, top-level `var`/`fun`,
-or non-`pub` class property/method that's never actually used gets
-flagged.
+non-`pub` class property/method, or `import` that's never actually used
+gets flagged.
 
 ```
 fun f(a, b) {
@@ -1309,36 +1317,20 @@ for the full history of how each was arrived at.
     scanner change (teaching ASI that `}` also implies a terminator,
     mirroring how many C-like languages' "automatic semicolon insertion"
     rules work) with its own test surface.
-11. **A runtime error raised from inside a `map`/`filter`/`reduce`/`sort`/
-    `elementwise` prelude function reports a `[line N]` relative to the
-    prelude's own source text, not the user's file.** `Program.fs` scans
-    and parses `Prelude.fs`'s embedded source separately from the user's
-    own, purely so a failure in each can be attributed correctly at
-    *compile* time — but once both are merged into one program and
-    compiled to one `Chunk`, a *runtime* fault raised from inside a
-    prelude function's own closure body carries that function's own
-    internal line number (1-based within `Prelude.fs`'s `source`
-    string), with nothing to indicate it came from a different "file"
-    than the one the user is looking at. Not solved here — nothing in
-    this pipeline has ever needed multi-file source-position tracking
-    before now.
-12. **`elementwise`'s shape-mismatch behavior is generic, not
+11. **`elementwise`'s shape-mismatch behavior is generic, not
     dedicated.** Unlike `transpose`/`multiply`/`add`/`subtract` (true
     natives with clean, custom-worded shape-validation errors),
     `elementwise` is ordinary Iqalox source with no `throw`/`raise`
     construct available to it — a shape mismatch surfaces as the
     ordinary "vector index out of range" error a step later, not a
     dedicated shape-mismatch message. See [§13](#13-the-standard-library).
-13. **A `pub trait`'s method bodies resolve in the *importing* module's
+12. **A `pub trait`'s method bodies resolve in the *importing* module's
     name space.** Traits are inlined into whichever class `use`s them
     (compile time, no runtime representation), so a trait method that
     calls a private, module-local function of its own file won't find it
     when the trait is used from another module. (A `pub class`'s methods
     don't have this problem — they stay compiled in their own module.)
     See [§17](#17-modules-and-imports-new-for-03).
-14. **Runtime errors in a multi-file program carry no file name.** The
-    `[line N]` refers to a line in *some* source file; the bytecode line
-    table has no file dimension. See [§14](#14-errors).
 
 The following limitations from earlier versions are **resolved**:
 vectors being literal-only with no indexing/mutation/length (now fixed as
@@ -1347,11 +1339,15 @@ of `0.2`, see `docs/LANGUAGE-0.1.md` §13 for the original write-up;
 [§13](#13-the-standard-library)), object fields having no immutability or
 declaration concept at all (now fixed as of `0.2`, `docs/LANGUAGE-0.1.md`
 §13; [§11](#11-classes-and-objects) — properties must be declared and
-default to write-once), and list comprehensions supporting only a single
+default to write-once), list comprehensions supporting only a single
 generator with no guard clause (now fixed as of `0.3`, see
 `docs/LANGUAGE-0.2.md` §15 once it exists for the original write-up;
 [§9](#9-vectors-indexing-cons-comprehensions-and-spread) covers the
-multi-generator/guarded form).
+multi-generator/guarded form), and runtime errors reporting only a
+bare `[line N]` with no file — which mattered once a program could span
+several files, and left a fault inside a standard-library function
+pointing at a line number in text the user never wrote (now `[file, line
+N]` for every runtime fault, [§14](#14-errors)).
 
 ## 16. Grammar and precedence reference
 
@@ -1413,6 +1409,9 @@ import shapes.Shape, shapes.Named
   `Variable 'x' already declared.` error; `as` is how you resolve it.
 - Importing a name that isn't `pub`, or doesn't exist, is a compile-time
   error naming the module and the name.
+- An import that is never used gets the same kind of warning as an unused
+  variable (`Import 'x' is never used.`, [§14](#14-errors)); naming the
+  local binding with a leading `_` (`import a.b.x as _x`) exempts it.
 - Two different modules may each declare a top-level `helper`; they don't
   clash, because each file's declarations are its own.
 - Circular imports (including back to the entry file) are a compile-time
@@ -1420,6 +1419,6 @@ import shapes.Shape, shapes.Named
 - Imported classes and traits compose like local ones: a class can
   `extends` or `with` an imported class and `use` an imported trait, and
   a subclass's `self.x` is checked against the imported class's members
-  as usual (limitation: [§15](#15-known-limitations) item 13 for traits).
+  as usual (limitation: [§15](#15-known-limitations) item 12 for traits).
 
 `langspec/examples/modules/` has a complete three-file program.

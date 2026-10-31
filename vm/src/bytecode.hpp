@@ -16,10 +16,13 @@ namespace iqalox::bytecode {
 // `compiler/` writes, `vm/` reads). v2 adds a per-instruction-byte source
 // line table (see `Chunk::lines`) so a runtime fault can report a real
 // `[line N]`, closing a real diagnostics gap v1 (Phases 1-9) left open.
+// v3 adds a source-FILE dimension on top (a program-wide file table plus a
+// per-instruction-byte file index, `Chunk::files`), since a multi-file
+// program compiles to one chunk -- `docs/PLAN-0.3.md` Phases 4-5.
 // Supersedes format v0, Phase 1's minimal round-trip proof (a single
 // opcode: push a string constant, print it, halt) now that `compiler/`'s
 // codegen (Phase 5) actually produces real programs.
-[[maybe_unused]] constexpr uint8_t kFormatVersion = 2;
+[[maybe_unused]] constexpr uint8_t kFormatVersion = 3;
 
 // One-to-one with `compiler/src/Bytecode.fs`'s `opcodeOf` -- same names,
 // same byte values.

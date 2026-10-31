@@ -535,7 +535,7 @@ any module, redeclaring a prelude name still an error, per-module
 diagnostic attribution, and a linked program compiling to one chunk.
 Known limitation carried over from the prelude merge: runtime errors report
 a line number with no indication of which file it belongs to
-(the bytecode line table has no file dimension).
+(the bytecode line table has no file dimension -- added in Phase 5, format v3).
 
 **Phase 5 — Module system: `import` and `pub`-as-export — done.** The
 last syntax details decisions 5 and 6 left open were put to the
@@ -614,6 +614,55 @@ an imported class, undeclared-property check still applies to a subclass
 of an imported class, `use` an imported trait, `pub` unused-exemption,
 nested `import`/`pub`, in-isolation rejection, transitive chains).
 
+**Follow-ups requested by the repository owner, same phase** (after the
+first pass of this phase had shipped with both as "known limitations"):
+
+- **Unused imports are warned about** (`Import 'x' is never used.`, at the
+  import's local name — the alias if there is one), with the same `_`-prefix
+  exemption as every other unused check. "Used" means the name is read
+  anywhere, including as an `extends`/`with` operand (those resolve like
+  any other read), or appears in a `use` clause — trait use is inlined at
+  compile time and never goes through `resolveReference`, so the check
+  consults every class's/trait's `use` list separately. An import that is
+  only assigned to (itself an error) still counts as unused.
+- **Runtime errors name their source file.** This is a bytecode **format
+  change**: v3 adds a program-wide file table right after the version
+  byte (count + names) and, per chunk, a per-instruction-byte file index
+  parallel to v2's line table. `Chunk` gained `Files`; `Codegen` gained
+  `compileSegments`, which takes each file's resolved statements as a
+  separate segment, stamps every instruction with its segment's file
+  (a nested function simply inherits the file current when it is
+  compiled — a function never spans files), and returns the file table
+  for `Bytecode.writeWithFiles` (`compile`/`write` are unchanged
+  wrappers using one unnamed file). `Modules.ModuleSource` gained `File`
+  (path relative to the entry file's directory, `/`-separated on every
+  platform) and `LinkedProgram` gained `Segments`; the prelude is its own
+  segment, `<prelude>`. On the VM, `bytecode::load` fills a new
+  `Vm::sourceFiles` and `Chunk::files` indexes into it; `Vm::runtimeError`
+  now emits `[math/vector.iqx, line 2]`, falling back to a bare
+  `[line N]` for a hand-built chunk or an empty file name. This also
+  retires `docs/LANGUAGE.md`'s old §15 item 11 (a fault inside a prelude
+  function reported a line number into text the user never wrote — now
+  `[<prelude>, line N]`).
+  While checking this end to end a **pre-existing gap** turned up that
+  would have made it incomplete: operand type errors ("Operands must be
+  numbers.") and every error raised by a built-in function (`pop` on an
+  empty vector, ...) were thrown as bare `RuntimeError`s that never went
+  through `runtimeError`, so they carried no location at all — not even a
+  line. The operand checks now call `runtimeError`, and `callNative`
+  re-raises a native's `RuntimeError` through it, so the call site's
+  `[file, line N]` is attached in one central place. **One output-format
+  choice worth flagging**: a *single-file* program's runtime errors now
+  also show the file (`[main.iqx, line 3]`, formerly `[line 3]`) — the
+  alternative of only naming the file for multi-file programs would have
+  made the format depend on how many files happened to be involved.
+  Compile-time messages are unchanged (`[line N]` entry, `[module, line
+  N]` otherwise). 3 + 1 new Catch2 tests (file table loading, file-aware
+  error, bare-line fallback, operand-error location), and 11 new xUnit
+  tests (v3 writer layout, per-byte file indices, stamping per module
+  including the prelude, relative `/`-separated names, and the
+  unused-import cases above).
+
 Known limitations, deliberately not papered over:
 
 - **A used trait's body is inlined into the importing class**
@@ -624,12 +673,6 @@ Known limitations, deliberately not papered over:
   in the exporting module). Fixing it needs trait bodies to carry their
   home module's bindings; flagged for the repository owner rather than
   guessed at.
-- An **unused import** is not warned about (decision 4's warning covers
-  locals, parameters, private members and top-level `var`/`fun`
-  declarations only; imports weren't part of what was asked for).
-- Runtime errors still report a bare `[line N]` with no file (the
-  bytecode line table has no file dimension), now reachable from real
-  multi-file programs.
 
 **Phase 6 — Revisit: array-manipulation stdlib under a namespace.**
 Blocked on open question 1 — raise it with the repository owner once

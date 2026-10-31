@@ -27,6 +27,11 @@ let private pushLines (bytes: ResizeArray<byte>) (code: Instruction[]) (lines: i
     for i in 0 .. code.Length - 1 do
         for _ in 1 .. instructionByteLength code.[i] do
             pushU16 bytes (uint16 lines.[i])
+    // ...followed by the equally per-byte file indices (format v3), which
+    // every test chunk here leaves at file 0.
+    for i in 0 .. code.Length - 1 do
+        for _ in 1 .. instructionByteLength code.[i] do
+            pushU16 bytes 0us
 
 [<Fact>]
 let ``instructionByteLength is 1 for every no-operand instruction`` () =
@@ -57,11 +62,12 @@ let ``instructionByteLength for Closure grows by 3 bytes per upvalue`` () =
 
 [<Fact>]
 let ``an empty chunk writes just the header and zero counts`` () =
-    let bytes = writeAndRead { Constants = [||]; Code = [||]; Lines = [||] }
+    let bytes = writeAndRead { Constants = [||]; Code = [||]; Lines = [||]; Files = [||] }
 
     let expected = ResizeArray<byte>()
     expected.AddRange("IQBC"B)
     expected.Add(FormatVersion)
+    pushU16 expected 0us // file_count (format v3)
     pushU32 expected 0u // constant_count
     pushU32 expected 0u // code_length
     // no code bytes, so no lines bytes either
@@ -77,11 +83,12 @@ let ``number and string constants encode with their tag, then payload`` () =
         writeAndRead
             { Constants = [| NumberConstant 1.5; StringConstant "hi" |]
               Code = code
-              Lines = lines }
+              Lines = lines; Files = Array.zeroCreate lines.Length }
 
     let expected = ResizeArray<byte>()
     expected.AddRange("IQBC"B)
     expected.Add(FormatVersion)
+    pushU16 expected 0us // file_count (format v3)
     pushU32 expected 2u // constant_count
     expected.Add(0x00uy) // number tag
     expected.AddRange(BitConverter.GetBytes(1.5))
@@ -109,7 +116,7 @@ let ``jump targets serialize as byte offsets, not instruction-array indices`` ()
     // jump's target index (2) must serialize as byte offset 4, not 2.
     let code = [| Nil; JumpIfFalse 2; Pop |]
     let lines = [| 1; 1; 1 |]
-    let bytes = writeAndRead { Constants = [||]; Code = code; Lines = lines }
+    let bytes = writeAndRead { Constants = [||]; Code = code; Lines = lines; Files = Array.zeroCreate lines.Length }
 
     let codeBytes = ResizeArray<byte>()
     codeBytes.Add(0x02uy) // NIL
@@ -120,6 +127,7 @@ let ``jump targets serialize as byte offsets, not instruction-array indices`` ()
     let expected = ResizeArray<byte>()
     expected.AddRange("IQBC"B)
     expected.Add(FormatVersion)
+    pushU16 expected 0us // file_count (format v3)
     pushU32 expected 0u
     pushU32 expected (uint32 codeBytes.Count)
     expected.AddRange codeBytes
@@ -133,7 +141,7 @@ let ``a jump targeting one past the end of the code uses the total code length``
     // so the target must be the total serialized byte length instead.
     let code = [| Jump 1 |]
     let lines = [| 1 |]
-    let bytes = writeAndRead { Constants = [||]; Code = code; Lines = lines }
+    let bytes = writeAndRead { Constants = [||]; Code = code; Lines = lines; Files = Array.zeroCreate lines.Length }
 
     let codeBytes = ResizeArray<byte>()
     codeBytes.Add(0x1Duy) // JUMP
@@ -142,6 +150,7 @@ let ``a jump targeting one past the end of the code uses the total code length``
     let expected = ResizeArray<byte>()
     expected.AddRange("IQBC"B)
     expected.Add(FormatVersion)
+    pushU16 expected 0us // file_count (format v3)
     pushU32 expected 0u
     pushU32 expected (uint32 codeBytes.Count)
     expected.AddRange codeBytes
@@ -157,7 +166,7 @@ let ``each instruction's line is repeated once per byte of its own serialized le
     // every instruction after the first one wider than a single byte.
     let code = [| Constant 0; Pop |]
     let lines = [| 7; 9 |]
-    let bytes = writeAndRead { Constants = [| NumberConstant 1.0 |]; Code = code; Lines = lines }
+    let bytes = writeAndRead { Constants = [| NumberConstant 1.0 |]; Code = code; Lines = lines; Files = Array.zeroCreate lines.Length }
 
     // Skip past the header/constant section to the code_length + code +
     // lines tail, which is all this test cares about.
@@ -190,9 +199,9 @@ let ``Closure encodes its function index, upvalue count, then each upvalue`` () 
                          Arity = 0
                          LocalCount = 0
                          Upvalues = []
-                         Chunk = { Constants = [||]; Code = [||]; Lines = [||] } } |]
+                         Chunk = { Constants = [||]; Code = [||]; Lines = [||]; Files = [||] } } |]
               Code = code
-              Lines = lines }
+              Lines = lines; Files = Array.zeroCreate lines.Length }
 
     let codeBytes = ResizeArray<byte>()
     codeBytes.Add(0x22uy) // CLOSURE
@@ -222,13 +231,14 @@ let ``a FunctionConstant serializes name, arity, local count, upvalues, then its
           Arity = 2
           LocalCount = 3
           Upvalues = [ { FromEnclosingLocal = true; Index = 0 } ]
-          Chunk = { Constants = [||]; Code = [| Return |]; Lines = [| 3 |] } }
+          Chunk = { Constants = [||]; Code = [| Return |]; Lines = [| 3 |]; Files = [| 0 |] } }
 
-    let bytes = writeAndRead { Constants = [| FunctionConstant proto |]; Code = [||]; Lines = [||] }
+    let bytes = writeAndRead { Constants = [| FunctionConstant proto |]; Code = [||]; Lines = [||]; Files = [||] }
 
     let expected = ResizeArray<byte>()
     expected.AddRange("IQBC"B)
     expected.Add(FormatVersion)
+    pushU16 expected 0us // file_count (format v3)
     pushU32 expected 1u // constant_count
     expected.Add(0x02uy) // function tag
     pushU32 expected 1u // name length
@@ -243,8 +253,38 @@ let ``a FunctionConstant serializes name, arity, local count, upvalues, then its
     pushU32 expected 1u // code_length (RETURN is 1 byte)
     expected.Add(0x23uy) // RETURN
     pushU16 expected 3us // RETURN's line
+    pushU16 expected 0us // RETURN's file
 
     pushU32 expected 0u // top-level code_length
     // top-level code is empty, so no top-level lines bytes
 
     Assert.Equal<byte[]>(expected.ToArray(), bytes)
+
+[<Fact>]
+let ``writeWithFiles puts the file table right after the version byte`` () =
+    let path = tempPath ()
+    try
+        writeWithFiles [| "main.iqx"; "math/vector.iqx" |] { Constants = [||]; Code = [||]; Lines = [||]; Files = [||] } path
+        let bytes = File.ReadAllBytes path
+        let expected = ResizeArray<byte>()
+        expected.AddRange("IQBC"B)
+        expected.Add(FormatVersion)
+        pushU16 expected 2us // file_count
+        for name in [ "main.iqx"; "math/vector.iqx" ] do
+            let nameBytes = Text.Encoding.UTF8.GetBytes name
+            pushU32 expected (uint32 nameBytes.Length)
+            expected.AddRange nameBytes
+        pushU32 expected 0u // constant_count
+        pushU32 expected 0u // code_length
+        Assert.Equal<byte[]>(expected.ToArray(), bytes)
+    finally
+        File.Delete path
+
+[<Fact>]
+let ``each instruction's file index is written once per byte after the lines`` () =
+    let code = [| Constant 0; Pop |]
+    let bytes =
+        writeAndRead { Constants = [| NumberConstant 1.0 |]; Code = code; Lines = [| 5; 6 |]; Files = [| 0; 2 |] }
+    // tail: 4 bytes of code, 4 u16 lines (5,5,5,6), 4 u16 files (0,0,0,2)
+    let files = bytes.[bytes.Length - 8 ..]
+    Assert.Equal<byte[]>([| 0uy; 0uy; 0uy; 0uy; 0uy; 0uy; 2uy; 0uy |], files)

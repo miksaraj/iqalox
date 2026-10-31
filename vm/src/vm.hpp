@@ -78,6 +78,12 @@ public:
     Vm();
     ~Vm();
 
+    // The loaded program's source-file names (`bytecode::load` fills this
+    // from the format-v3 file table); `Chunk::files` indexes into it so a
+    // runtime error can say which file it came from. Empty for a
+    // hand-built program.
+    std::vector<std::string> sourceFiles;
+
     Vm(const Vm&) = delete;
     Vm& operator=(const Vm&) = delete;
 
@@ -169,8 +175,8 @@ private:
     // external access (unlike the `pub`/`mut` gate, which only external
     // access needs at all).
     void checkPropertyNotUndef(const Value& value, const std::string& propName);
-    static void checkNumberOperand(const Value& value, const char* message);
-    static void checkNumberOperands(const Value& a, const Value& b, const char* message);
+    void checkNumberOperand(const Value& value, const char* message);
+    void checkNumberOperands(const Value& a, const Value& b, const char* message);
     // Shared by GetIndex/SetIndex. Validates `receiver` is a vector and
     // `indexValue` is an in-range integer index, returning the validated
     // (already from-the-end-translated) index. `docs/PLAN-0.3.md`

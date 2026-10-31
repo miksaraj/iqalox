@@ -9,6 +9,7 @@ open Iqalox.Bound
 open Iqalox.Resolver
 open Iqalox.Codegen
 open Iqalox.Modules
+open Iqalox.Bytecode
 
 // All paths here are fake -- `loadModules` only ever calls the injected
 // `parse` callback, never touches the file system itself.
@@ -313,3 +314,76 @@ let ``a transitive import chain links and compiles`` () =
     Assert.All(linked.Diagnostics, fun d -> Assert.Empty d.Errors)
     let _, codegenErrors = compile linked.Bound
     Assert.Empty codegenErrors
+
+// --- unused-import warnings ---
+
+[<Fact>]
+let ``an import that is never used produces a warning`` () =
+    let linked = linkAuto [ "main", "import dep.f\nprint 1"; "dep", "pub fun f() {\n    return 1\n}" ]
+    Assert.Equal<string list>([ "Import 'f' is never used." ], warningsOf linked "main")
+
+[<Fact>]
+let ``an import that is called produces no warning`` () =
+    let linked = linkAuto [ "main", "import dep.f\nprint f()"; "dep", "pub fun f() {\n    return 1\n}" ]
+    Assert.Empty(warningsOf linked "main")
+
+[<Fact>]
+let ``an unused aliased import warns under the alias`` () =
+    let linked = linkAuto [ "main", "import dep.f as g\nprint 1"; "dep", "pub fun f() {\n    return 1\n}" ]
+    Assert.Equal<string list>([ "Import 'g' is never used." ], warningsOf linked "main")
+
+[<Fact>]
+let ``an underscore-prefixed unused import is exempt`` () =
+    let linked = linkAuto [ "main", "import dep.f as _f\nprint 1"; "dep", "pub fun f() {\n    return 1\n}" ]
+    Assert.Empty(warningsOf linked "main")
+
+[<Fact>]
+let ``an import only assigned to (which is an error anyway) is still unused`` () =
+    let linked = linkAuto [ "main", "import dep.v\nv = 1"; "dep", "pub var v mut = 0" ]
+    Assert.Contains("Import 'v' is never used.", warningsOf linked "main")
+
+[<Fact>]
+let ``an imported class used only as a superclass counts as used`` () =
+    let linked =
+        linkAuto
+            [ "main", "import dep.Base\nclass D extends Base {\n    pub go() {\n        return 1\n    }\n}\nprint D().go()"
+              "dep", "pub class Base {\n}" ]
+    Assert.Empty(warningsOf linked "main")
+
+[<Fact>]
+let ``an imported trait used only by a use clause counts as used`` () =
+    let linked =
+        linkAuto
+            [ "main", "import dep.T\nclass C {\n    use T\n}\nC()"
+              "dep", "pub trait T {\n    pub hello() {\n        return 1\n    }\n}" ]
+    Assert.Empty(warningsOf linked "main")
+
+// --- file names in the compiled program ---
+
+[<Fact>]
+let ``each module's instructions are stamped with its own file, prelude included`` () =
+    let linked =
+        linkAuto
+            [ "main", "import dep.f\nprint f()"
+              "dep", "pub fun f() {\n    return 1\n}" ]
+    let chunk, fileNames, errors = compileSegments linked.Segments
+    Assert.Empty errors
+    Assert.Equal<string list>([ "<prelude>"; "dep.iqx"; "main.iqx" ], List.ofArray fileNames)
+    // Every file index in use is a valid index, the top-level chunk touches
+    // all three files, and the function `f` (declared in dep.iqx, index 1)
+    // is stamped entirely with dep's index.
+    Assert.All(chunk.Files, fun i -> Assert.InRange(i, 0, 2))
+    Assert.Equal<int list>([ 0; 1; 2 ], chunk.Files |> Array.distinct |> Array.sort |> List.ofArray)
+    let protoFor name =
+        chunk.Constants
+        |> Array.pick (function
+            | FunctionConstant p when p.Name = name -> Some p
+            | _ -> None)
+    Assert.All((protoFor "f").Chunk.Files, fun i -> Assert.Equal(1, i))
+    Assert.All((protoFor "map").Chunk.Files, fun i -> Assert.Equal(0, i))
+
+[<Fact>]
+let ``a module in a subdirectory is named by its relative path with forward slashes`` () =
+    let linked = linkAuto [ "main", "import math.vector.f\nprint f()"; "math.vector", "pub fun f() {\n    return 1\n}" ]
+    let _, fileNames, _ = compileSegments linked.Segments
+    Assert.Contains("math/vector.iqx", fileNames)

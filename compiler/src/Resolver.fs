@@ -496,6 +496,10 @@ let private findDeclaredMethod (effectiveMembers: Dictionary<string, MemberSet>)
     | true, m -> m.Methods.ContainsKey methodName
     | false, _ -> false
 
+/// `_`-prefixed names are exempt from every unused check (`docs/PLAN-0.3.md`
+/// decision 4, open question 3).
+let private isExemptFromUnusedCheckName (lexeme: string) = lexeme.StartsWith "_"
+
 type private Resolver
     (
         globals: Dictionary<string, bool>,
@@ -609,6 +613,7 @@ type private Resolver
             DeclaredLocal slot
 
     member this.Errors = List.ofSeq errors
+    member this.WasGlobalRead(name: string) = usedGlobalNames.Contains name
     member this.Warnings = List.ofSeq warnings
 
     /// Warns on any non-`pub` property/method declared directly in a
@@ -1199,6 +1204,28 @@ let private resolveInternal
     // not within this file -- same reasoning as `pub` class members.
     resolver.CheckUnusedGlobals(Set.union exemptGlobalNames (Set.ofSeq exportedNames))
 
+    // An import is "used" if the name is ever read -- including as an
+    // `extends`/`with` operand, which resolves through `resolveReference`
+    // like any other read -- or named by a `use` clause (trait use is
+    // inlined at compile time and never goes through `resolveReference`).
+    let usedTraitNames =
+        stmts
+        |> List.collect (function
+            | ClassStmt(_, _, _, _, _, used) -> used
+            | TraitStmt(_, _, _, used) -> used
+            | _ -> [])
+        |> List.map (fun t -> t.Lexeme)
+        |> Set.ofList
+    let unusedImportWarnings =
+        [ for import in imports do
+            let local = import.Local.Lexeme
+            if
+                not (isExemptFromUnusedCheckName local)
+                && not (resolver.WasGlobalRead local)
+                && not (usedTraitNames.Contains local)
+            then
+                yield { Message = $"Import '{local}' is never used."; Token = import.Local } ]
+
     let exports =
         [ for name in exportedNames |> Seq.distinct do
             let kind =
@@ -1222,7 +1249,7 @@ let private resolveInternal
 
     { Bound = bound
       Errors = (List.ofSeq preErrors) @ resolver.Errors
-      Warnings = resolver.Warnings
+      Warnings = resolver.Warnings @ unusedImportWarnings
       DeclaredGlobals = globals.Keys |> Seq.filter (fun k -> not (seeded.Contains k)) |> Set.ofSeq
       Exports = exports }
 

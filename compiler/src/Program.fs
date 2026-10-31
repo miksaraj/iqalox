@@ -106,14 +106,14 @@ let main argv =
                                     eprintfn "%s Error: %s" (label d e.Token.Line) e.Message
                             65
                         else
-                            let chunk, codegenErrors = compile linked.Bound
+                            let chunk, fileNames, codegenErrors = compileSegments linked.Segments
 
                             if not codegenErrors.IsEmpty then
                                 for e in codegenErrors do
                                     eprintfn "[line %d] Error: %s" e.Line e.Message
                                 65
                             else
-                                write chunk outputPath
+                                writeWithFiles fileNames chunk outputPath
                                 0
     | _ ->
         eprintfn "Usage: iqaloxc <input .iqx file> <output bytecode file>"
