@@ -15,6 +15,7 @@
     <Compile Include="BytecodeTests.fs" />
     <Compile Include="CodegenTests.fs" />
     <Compile Include="PreludeTests.fs" />
+    <Compile Include="ModuleTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 

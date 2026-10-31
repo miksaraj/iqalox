@@ -237,7 +237,7 @@ each one, verified via new tests (§6).
 | Multi-generator list comprehensions | §1.1 | Done |
 | List comprehension guard clause | §1.1 | Done |
 | Unused-variable compile-time warning | §2.3 | Done |
-| Module support (file-based, `import`, compile-time-only) | §1.4-9 | Not started |
+| Module support (file-based, `import`, compile-time-only) | §1.4-9 | In progress (Phase 4 plumbing done; `import`/`pub` export = Phase 5) |
 | Array-manipulation stdlib namespace revisit | §2.1 | Not started (open question) |
 | First set of compiler optimizations | §2.2 | Not started |
 
@@ -475,11 +475,67 @@ class produces no warning (classes are deliberately out of scope), and
 two `resolveWithExemptGlobals`-specific tests (an exempted name never
 warns; a non-exempted sibling still does).
 
-**Phase 4 — Module system: multi-file compilation infrastructure.**
-`Program.fs`'s dependency-resolution pass (file discovery, path-to-module
-mapping, cycle detection); `Resolver.fs` processes the whole resolved
-file set together. No `import` *statement* yet at this point — just the
-plumbing to compile more than one file into one program at all.
+**Phase 4 — Module system: multi-file compilation infrastructure — done.**
+Scoped literally per the plan (confirmed with the repository owner when
+the phase started, since `import` — the only thing that can trigger
+multi-file loading from real source — is Phase 5): plumbing only, no new
+syntax, no `vm/` or bytecode-format changes (decision 7).
+
+New `compiler/src/Modules.fs`: `moduleNameOfPath`/`modulePathOfName`
+(`math/vector.iqx` ↔ `math.vector`, relative to the entry file's own
+directory — decisions 4 and 8); `loadModules`, a depth-first loader that
+takes the entry path plus an injected `parse` callback returning each
+file's statements **and the dotted module names it depends on**, yielding
+dependency order (entry last), parsing a shared dependency once, and
+reporting a circular dependency (`Circular module dependency: a -> b ->
+a.`) instead of looping. The callback is the seam Phase 5 plugs `import`
+into: until the AST has an import node, `Program.fs` always reports no
+dependencies, so every real program is still a single-module program.
+
+Name isolation was the one thing the plan didn't spell out, and it falls
+straight out of decisions 4 and 6 (a module's top-level names are its
+own): two modules must be able to declare the same top-level `helper`
+without an "already declared" clash. Done by resolving **each file as its
+own unit** (`Resolver.resolveUnit`, returning a `ResolvedUnit` that also
+reports which globals the unit itself declared) and then qualifying those
+globals (`dep::helper`) by rewriting the already-resolved `Bound` tree
+(`Modules.qualifyModule`) — deliberately on the bound tree rather than the
+AST, because by then locals are slots, so there is no local-shadows-global
+case to get wrong. The entry module is left unqualified, which is what
+keeps single-file output byte-identical. The prelude is now resolved once
+as its own unit and its declared names seed every user module as ordinary
+immutable root globals (same mechanism as `nativeGlobals`), replacing the
+old textual `preludeStmts @ stmts` merge; redeclaring `map` etc. is still
+the same "already declared" error, and the prelude exemption added in the
+Phase 3 follow-up (`resolveWithExemptGlobals`) stays for callers that
+still merge textually. `resolveInternal` now returns a record and `resolve`/
+`resolveWithExemptGlobals` keep their old tuple shapes, so no existing
+call site changed.
+
+`Program.fs` now drives `loadModules` → `linkModules` (prelude, then
+modules in dependency order, entry last — the same execution order the
+old merge gave). Diagnostics are attributed per module (`[line N]` for the
+entry exactly as before; `[math.vector, line N]` for other modules, not yet
+reachable from the CLI). One small behavior change: an unreadable input
+file is now a clean `Error: cannot read module file ...` with exit 65
+instead of an unhandled exception.
+
+Verification beyond the unit tests: every `langspec/examples/*.iqx`
+compiles to **byte-identical** `.iqbc` output versus the pre-change
+compiler (checked with `cmp`), with zero warnings; and, since no source
+syntax can load two files yet, a two-module program (both declaring
+`helper`, one also a function using it) was linked programmatically,
+written out, and run on the real VM — each module saw its own `helper`
+(`4`, `2`, `1`, dependency first). 14 new xUnit tests (`ModuleTests.fs`):
+name↔path mapping, single/ordered/diamond loading (diamond parsed once),
+cycle and self-cycle detection, load-error propagation, same-name
+globals across modules, qualification of variables/functions/classes and
+references to them, prelude names staying unqualified and callable from
+any module, redeclaring a prelude name still an error, per-module
+diagnostic attribution, and a linked program compiling to one chunk.
+Known limitation carried over from the prelude merge: runtime errors report
+a line number with no indication of which file it belongs to
+(the bytecode line table has no file dimension).
 
 **Phase 5 — Module system: `import` and `pub`-as-export.** The `import`
 statement itself (decision 5), module-qualified name resolution, and

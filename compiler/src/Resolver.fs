@@ -1037,13 +1037,35 @@ type private Resolver
 let private nativeGlobals =
     [ "print"; "concat"; "push"; "pop"; "length"; "reverse"; "transpose"; "multiply"; "add"; "subtract" ]
 
-/// Shared implementation behind `resolve`/`resolveWithExemptGlobals`
-/// below -- `exemptGlobalNames` is the only thing that differs between
-/// the two public entry points.
-let private resolveInternal (stmts: Stmt list) (exemptGlobalNames: Set<string>) : BoundStmt list * ResolveError list * ResolveError list =
+/// The result of resolving one compilation unit (the prelude, or a single
+/// module's source file) in isolation. `DeclaredGlobals` is every
+/// top-level `var`/`fun`/`class` name the unit itself declared (never
+/// the natives or `rootGlobals` it was seeded with) -- `Modules.fs` uses
+/// it to qualify exactly those names when linking several units into one
+/// program (`docs/PLAN-0.3.md` Phase 4).
+type ResolvedUnit =
+    { Bound: BoundStmt list
+      Errors: ResolveError list
+      Warnings: ResolveError list
+      DeclaredGlobals: Set<string> }
+
+/// Shared implementation behind `resolve`/`resolveWithExemptGlobals`/
+/// `resolveUnit` below. `rootGlobals` are extra immutable global names
+/// pre-seeded exactly like `nativeGlobals` (declared by some *other*
+/// unit, typically the prelude, that this unit may reference but did not
+/// itself declare -- so redeclaring one is the same "already declared"
+/// error, and none are ever checked for unused-ness here).
+let private resolveInternal
+    (rootGlobals: string list)
+    (stmts: Stmt list)
+    (exemptGlobalNames: Set<string>)
+    : ResolvedUnit =
     let globals = Dictionary<string, bool>()
     for name in nativeGlobals do
         globals.[name] <- false
+    for name in rootGlobals do
+        globals.[name] <- false
+    let seeded = Set.ofSeq globals.Keys
     let globalDecls = Dictionary<string, Token * string>()
     let preErrors = ResizeArray<ResolveError>()
     preRegisterGlobals globals globalDecls preErrors stmts
@@ -1072,7 +1094,12 @@ let private resolveInternal (stmts: Stmt list) (exemptGlobalNames: Set<string>) 
     resolver.CheckUnusedClassMembers()
     resolver.CheckUnusedGlobals(exemptGlobalNames)
 
-    bound, (List.ofSeq preErrors) @ resolver.Errors, resolver.Warnings
+    { Bound = bound
+      Errors = (List.ofSeq preErrors) @ resolver.Errors
+      Warnings = resolver.Warnings
+      DeclaredGlobals = globals.Keys |> Seq.filter (fun k -> not (seeded.Contains k)) |> Set.ofSeq }
+
+let private asTuple (r: ResolvedUnit) = r.Bound, r.Errors, r.Warnings
 
 /// Resolves `stmts` into a `BoundStmt` list plus any resolution errors
 /// (compile-time immutability violations, redeclarations, `self`/`super`
@@ -1082,17 +1109,18 @@ let private resolveInternal (stmts: Stmt list) (exemptGlobalNames: Set<string>) 
 /// affect exit status. Never throws -- every error is recorded and
 /// resolution continues, since (unlike a syntax error) a semantic error
 /// doesn't prevent understanding the rest of the program's structure.
-let resolve (stmts: Stmt list) : BoundStmt list * ResolveError list * ResolveError list = resolveInternal stmts Set.empty
+let resolve (stmts: Stmt list) : BoundStmt list * ResolveError list * ResolveError list =
+    resolveInternal [] stmts Set.empty |> asTuple
 
 /// Like `resolve`, but never warns about an unused top-level `var`/`fun`
 /// whose name is in `exemptGlobalNames`, regardless of whether the
-/// program actually reads it. `Program.fs` uses this for the merged
-/// prelude+user program, passing every one of the prelude's own function
-/// names (`map`/`filter`/`reduce`/`sort`/`elementwise`) -- these are
-/// ordinary top-level `fun` declarations exactly like any user function
-/// (`docs/PLAN-0.2.md` Phase 5), so without this exemption a user program
-/// that only calls `map` would be warned that `sort`/`filter`/`reduce`/
-/// `elementwise` are "unused," even though the user never declared them
-/// and has no way to remove them.
+/// program actually reads it (used where the prelude is still textually
+/// merged into the same unit as user code).
 let resolveWithExemptGlobals (stmts: Stmt list) (exemptGlobalNames: Set<string>) : BoundStmt list * ResolveError list * ResolveError list =
-    resolveInternal stmts exemptGlobalNames
+    resolveInternal [] stmts exemptGlobalNames |> asTuple
+
+/// Resolves one compilation unit in isolation (`docs/PLAN-0.3.md` Phase
+/// 4): `rootGlobals` are names another unit (the prelude) declares that
+/// this one may reference as ordinary immutable globals.
+let resolveUnit (rootGlobals: string list) (stmts: Stmt list) : ResolvedUnit =
+    resolveInternal rootGlobals stmts Set.empty
