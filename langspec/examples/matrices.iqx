@@ -16,8 +16,7 @@
     lines yet. Not something this phase's scope (indexing) touches.
 #>
 
-import std.matrix.transpose, std.matrix.multiply, std.matrix.add, std.matrix.subtract
-import std.matrix.elementwise
+import std.matrix.{transpose, multiply, add, subtract, elementwise}
 
 var matrix = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
 

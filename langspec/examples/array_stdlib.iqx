@@ -8,8 +8,7 @@
     the original untouched.
 #>
 
-import std.vector.length, std.vector.push, std.vector.pop, std.vector.reverse
-import std.vector.map, std.vector.filter, std.vector.reduce, std.vector.sort
+import std.vector.{length, push, pop, reverse, map, filter, reduce, sort}
 
 var v = [1, 2, 3]
 print length v

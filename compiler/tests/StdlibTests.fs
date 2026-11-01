@@ -181,3 +181,16 @@ let ``the whole library compiles to a single chunk`` () =
     Assert.Empty errors
     Assert.Contains("<std.vector>", fileNames)
     Assert.Contains("<std.matrix>", fileNames)
+
+[<Fact>]
+let ``a brace group of std imports binds every name, aliases included`` () =
+    let linked = linkMain "import std.vector.{push, length as len}\nvar v = []\npush v, 1\nprint len v"
+    Assert.Empty(mainErrors linked)
+    let referenced = globalNamesReferenced linked
+    Assert.Contains("push", referenced)
+    Assert.Contains("length", referenced)
+
+[<Fact>]
+let ``a name imported through a group collides like any other import`` () =
+    let linked = linkMain "import std.vector.{sort}\nfun sort(x) {\n    return x\n}\nprint 1"
+    Assert.Contains("Variable 'sort' already declared.", mainErrors linked)

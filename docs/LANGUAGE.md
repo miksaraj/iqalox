@@ -1,14 +1,16 @@
-# The Iqalox Language (0.2)
+# The Iqalox Language (0.3, in progress)
 
-> **For older versions, see:** [`docs/LANGUAGE-0.1.md`](LANGUAGE-0.1.md) for
-> `0.1` (the compiler frontend + bytecode VM this version builds directly
-> on top of) and [`docs/LANGUAGE-POC.md`](LANGUAGE-POC.md) for `0.1-poc`
-> (the original Python tree-walk interpreter, still kept in the repo as a
-> working reference implementation — `poc/`, per `CLAUDE.md`). Each
-> version gets its own `LANGUAGE-<version>.md` this way as Iqalox evolves;
-> this file always describes the current, actively-maintained version.
+> **Older versions** (`0.1-poc`, `0.1`, `0.2`) are preserved by git tags
+> rather than as separate files — see
+> [`docs/EARLIER-VERSIONS.md`](EARLIER-VERSIONS.md) for which tag holds
+> each one's reference (this document as it stood at the `0.2` release is
+> `git show 0.2.0:docs/LANGUAGE.md`). This file describes the current,
+> actively-maintained version, and marks what is **new for `0.3`** on top
+> of `0.2`'s language as it goes.
 
-This is the complete reference for Iqalox as implemented by `0.2` — a
+This is the complete reference for Iqalox as implemented so far — `0.2`'s
+language plus the `0.3` features that have landed (each marked "new for
+`0.3`") — a
 compiler frontend (`compiler/`, F#) that compiles `.iqx` source to a
 bytecode file, executed by a stack-based virtual machine (`vm/`, C++23).
 It documents what the language **actually does today**, with runnable
@@ -28,8 +30,7 @@ Every code sample below is valid Iqalox and, unless marked otherwise,
 compiles and runs successfully via `compiler/src/Iqaloxc.fsproj` (or
 `iqaloxc`, once built) piped into `vm/build/iqaloxvm`. Longer, complete
 programs live under `langspec/examples/*.iqx` — this version's
-active-target fixture set (see `langspec/README.md`); `0.1`'s own frozen
-snapshot lives under `langspec/versions/0.1/examples/*.iqx`.
+active-target fixture set (see `langspec/README.md`).
 **Since `0.3` the standard library must be imported** ([§13](#13-the-standard-library)):
 samples below that call a library function (`push`, `concat`, `map`, ...) leave
 the `import std....` line out for brevity unless the sample is about imports.
@@ -1032,7 +1033,7 @@ lives in a built-in module under `std` and must be imported by name,
 exactly like names from your own modules ([§17](#17-modules-and-imports-new-for-03)):
 
 ```
-import std.vector.push, std.vector.map
+import std.vector.{push, map}
 import std.matrix.transpose
 ```
 
@@ -1110,7 +1111,7 @@ argument(s):
   ascending, `(a, b) -> a > b` for descending).
 
 ```
-import std.vector.map, std.vector.filter, std.vector.reduce, std.vector.sort
+import std.vector.{map, filter, reduce, sort}
 
 var v = [3, 1, 4, 1, 5]
 print (map (x) -> x * 2, v)              # [6, 2, 8, 2, 10]
@@ -1145,8 +1146,7 @@ ordinary "vector index out of range" error a step later — a real,
 non-crashing runtime error either way, just not a custom-worded one.
 
 ```
-import std.matrix.transpose, std.matrix.multiply, std.matrix.add
-import std.matrix.subtract, std.matrix.elementwise
+import std.matrix.{transpose, multiply, add, subtract, elementwise}
 
 var a = [[1, 2], [3, 4]]
 var b = [[5, 6], [7, 8]]
@@ -1371,14 +1371,14 @@ for the full history of how each was arrived at.
 
 The following limitations from earlier versions are **resolved**:
 vectors being literal-only with no indexing/mutation/length (now fixed as
-of `0.2`, see `docs/LANGUAGE-0.1.md` §13 for the original write-up;
+of `0.2`, see `git show 0.1.0:docs/LANGUAGE.md` §13 for the original write-up;
 [§9](#9-vectors-indexing-cons-comprehensions-and-spread),
 [§13](#13-the-standard-library)), object fields having no immutability or
-declaration concept at all (now fixed as of `0.2`, `docs/LANGUAGE-0.1.md`
-§13; [§11](#11-classes-and-objects) — properties must be declared and
+declaration concept at all (now fixed as of `0.2`, `git show
+0.1.0:docs/LANGUAGE.md` §13; [§11](#11-classes-and-objects) — properties must be declared and
 default to write-once), list comprehensions supporting only a single
 generator with no guard clause (now fixed as of `0.3`, see
-`docs/LANGUAGE-0.2.md` §15 once it exists for the original write-up;
+`git show 0.2.0:docs/LANGUAGE.md` §15 for the original write-up;
 [§9](#9-vectors-indexing-cons-comprehensions-and-spread) covers the
 multi-generator/guarded form), and runtime errors reporting only a
 bare `[line N]` with no file — which mattered once a program could span
@@ -1429,12 +1429,26 @@ pub var origin = [0, 0]             # importable (add `mut` for pub var x mut = 
 
 **`import`** brings specific names in, unqualified. The last dotted
 segment is the name; everything before it is the module path. Several
-can be listed, comma-separated, and `as` binds one under another name:
+names from one module can be grouped in braces so the module path isn't
+repeated, `as` binds one under another name, and entries are
+comma-separated:
 
 ```
-import math.vector.double, math.vector.origin as zero
-import shapes.Shape, shapes.Named
+import math.vector.double              # one name
+import math.vector.origin as zero      # renamed
+import shapes.{Shape, Named}           # several from one module
+import std.matrix.{transpose, multiply as mul, add}, math.vector.double
 ```
+
+A brace group may span lines (newlines inside the braces are ignored),
+which keeps a long list readable. It needs at least one name, and a
+trailing comma is not allowed. The braces are only a shorthand: they mean
+exactly what the same names written out one by one would.
+
+There is deliberately no wildcard (`import std.matrix.*`): once `1.0`
+starts the compatibility promise, adding a function to a library module
+would otherwise break any program that wildcard-imports it *and* declares
+the same name itself. Named imports are immune to that.
 
 - `import` is only allowed at the top level of a file (not inside a
   function, class or block), and may appear anywhere there.

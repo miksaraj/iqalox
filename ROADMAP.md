@@ -7,7 +7,8 @@ It reflects one renumbering decision made when this document was written:
 > (matrix support, array-manipulation stdlib, list comprehensions, ...) now
 > ships as plain **`0.2`** — a real release, not a second PoC. Every version
 > that used to come after `0.2-poc` is bumped up by one to make room. The
-> `langspec/archived/` snapshots (0.1, 0.2, 0.3) are **not** renumbered —
+> The old planning-era snapshots (formerly `langspec/archived/`, now read from
+> git tag `0.2.0`, see `docs/EARLIER-VERSIONS.md`) are **not** renumbered —
 > they're a historical record of planning-as-it-happened, not documentation
 > of the current plan. Use the mapping table below to translate old notes.
 
@@ -111,8 +112,8 @@ hardened, plus:
 - Immutability enforced at compile time, not runtime-only.
 - Classes can reference themselves by name from inside their own methods.
 
-See `docs/LANGUAGE-0.1.md` for the full `0.1` language reference (frozen
-as of `0.2`'s own Phase 9 fork, `docs/PLAN-0.2.md` §5), including a
+See `docs/LANGUAGE.md` at tag `0.1.0` (`git show 0.1.0:docs/LANGUAGE.md`) for the full `0.1` language
+reference (formerly kept as `docs/LANGUAGE-0.1.md`; see `docs/EARLIER-VERSIONS.md`), including a
 diagnostics-quality regression flagged there (§13) as a candidate for a
 follow-up phase rather than something silently left undocumented.
 
@@ -150,9 +151,8 @@ and phased sequencing:
   "Language feature ideas under consideration" below for the deferred full
   version)
 
-See `docs/LANGUAGE.md` for the full `0.2` language reference, and
-`docs/LANGUAGE-0.1.md` for `0.1`'s own reference, frozen when this version's
-Phase 9 forked it.
+`0.2`'s language reference is `docs/LANGUAGE.md` at tag `0.2.0`
+(`docs/EARLIER-VERSIONS.md`); the current `docs/LANGUAGE.md` has moved on to `0.3`.
 
 ### 0.3 *(formerly `0.2`)* — *active target*
 

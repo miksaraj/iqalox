@@ -751,6 +751,48 @@ unqualified entry module or a prelude were reworked, and the dead
 `resolveWithExemptGlobals` and its two tests removed (net 309 xUnit; Catch2
 unchanged at 114, since `vm/` only gained the message-prefix stripping).
 
+**Review follow-up, same phase: grouped imports.** The repository owner
+flagged on the PR that importing five names from one module meant writing
+`import std.matrix.transpose, std.matrix.multiply, ...`, repeating the
+module path every time — "incredibly verbose, and maybe not how a
+well-designed language forces the user to write their imports." Options
+were put to them and they chose **braces**: `import std.matrix.{transpose,
+multiply as mul, add}`, one group per module, several comma-separated, `as`
+inside the braces, newlines inside the braces skipped so a long list can
+span lines (the scanner emits a `Semicolon` token for every newline, with
+lexeme `"\n"` unlike a real `;`, so only the former is swallowed, and only
+inside a group). Rejected, with reasons: a **wildcard** (`import m.*`)
+would make adding a function to a library module a breaking change for any
+program that wildcard-imports it and also declares the same name — fatal
+once `1.0` is the stability line; **module-as-namespace** would reverse the
+decision that imported names are used bare and break `|>`, whose right side
+must be a bare name; and the **colon form** (`import m: a, b`) can only name
+one module per statement. A group expands in the parser to one `ImportItem`
+per name, so `Resolver`/`Modules` needed no change. 11 new tests (9 parser,
+2 linker).
+
+**Review follow-up, same phase: stop keeping frozen copies.** A second
+review comment on the PR pointed out that `docs/LANGUAGE.md` had been
+edited in place for `0.3` while the plan was still to fork it as the frozen
+`0.2` reference at the end — so the fork would not be `0.2` as released —
+and asked whether archives are worth keeping at all when git tags exist.
+Checked: tags `0.1.0-poc` through `0.1.3-poc`, `0.1.0` and `0.2.0` exist and
+each is an exact snapshot (the `0.2.0` tag alone holds the `0.1` and `0.2`
+language references, both grammars, the `0.1` snapshot and the pre-renumbering
+planning snapshots). The repository owner decided to **rely on tags**. Removed:
+`docs/LANGUAGE-0.1.md`, `docs/LANGUAGE-POC.md`, `langspec/archived/`,
+`langspec/versions/0.2/`, and `langspec/versions/0.1`'s README and grammar.
+Kept: `langspec/versions/0.1/examples/`, because CI's `poc/` smoke test and
+the `poc/` release bundle read it, and the plan documents, which are history
+in their own right (each older plan got a one-line banner explaining that
+paths it mentions now live in tags). New `docs/EARLIER-VERSIONS.md` is the
+single table of which tag and path holds what; every live reference
+(`CLAUDE.md`, `README.md`, `ROADMAP.md`, `langspec/README.md`,
+`docs/LANGUAGE.md`, the grammar) now points there. `docs/LANGUAGE.md` is
+retitled "(0.3, in progress)". Consequence worth knowing: `poc/`'s own
+language reference is now only reachable via a tag (`0.1.3-poc`), not in
+the tree beside the code it documents. Rule going forward: tag every release.
+
 Phase 4/5 entries above describe the module machinery as first built (a
 textually merged prelude, an unqualified entry module); read them as history
 — Phase 6 is what changed those two things.
@@ -761,10 +803,17 @@ correctness-focused test strategy (§6) beyond the usual instruction-
 sequence assertions, since the goal is identical *behavior* via smaller/
 faster bytecode, not new behavior.
 
-**Phase 8 — Docs.** Fork `docs/LANGUAGE.md` into `docs/LANGUAGE-0.2.md`
-(frozen) plus a new, current `docs/LANGUAGE.md` for `0.3`; verify every
-top-level `langspec/examples/*.iqx` fixture end to end; `ROADMAP.md`
-marks `0.3` delivered and moves the active-target goalposts to `0.4`.
+**Phase 8 — Docs.** *(Revised during Phase 6: no fork.)* The original plan
+was to fork `docs/LANGUAGE.md` into a frozen `docs/LANGUAGE-0.2.md`, but by
+then the file had been edited in place seven times for `0.3` — so the fork
+would have captured a half-`0.3` document, not `0.2` as released — and the
+repository owner pointed out that release tags already preserve exact
+snapshots. The project therefore **stopped keeping frozen copies in the
+tree** (see `docs/EARLIER-VERSIONS.md`). Phase 8 is now: tag `0.3.0`;
+review `docs/LANGUAGE.md` end to end and drop its "in progress" marker;
+verify every top-level `langspec/examples/*.iqx` fixture end to end;
+`ROADMAP.md` marks `0.3` delivered and moves the active-target goalposts
+to `0.4`.
 
 ## 6. Testing strategy
 

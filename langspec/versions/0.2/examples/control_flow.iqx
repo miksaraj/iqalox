@@ -1,8 +1,0 @@
-fun ifEqualOr(a, b) {
-    var equality = (a > b) ? "is greater than" : (a < b) ? "is less than" : "is equal to"
-    [a, equality, b] |> concat |> print
-}
-
-ifEqualOr 2, 5
-ifEqualOr 5, 2
-ifEqualOr 2, 2

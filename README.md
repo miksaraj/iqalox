@@ -7,8 +7,8 @@ preferences and interests. "*Iqalox*" is a play on the Kalaallisut word for Arct
 `0.2` is the current, primary implementation: a compiler frontend (F#, `compiler/`) that compiles `.iqx`
 source to a bytecode file, executed by a stack-based virtual machine (modern C++23, `vm/`). This repository
 also keeps `poc/` around — the original `0.1-poc` proof of concept, a Python tree-walk interpreter — as a
-frozen, working reference implementation, and `docs/LANGUAGE-0.1.md` documents the earlier `0.1` milestone,
-which `0.2` has superseded.
+frozen, working reference implementation. Earlier versions are preserved by git tags; see
+`docs/EARLIER-VERSIONS.md` for where to read each one.
 
 ## Getting started
 
@@ -38,9 +38,9 @@ iqaloxvm classes.iqbc
 (If you built from source instead of downloading a release, replace `iqaloxc` with
 `dotnet run --project compiler/src/Iqaloxc.fsproj --` and `iqaloxvm` with `vm/build/iqaloxvm`.)
 
-See `docs/LANGUAGE.md` for the full `0.2` language reference (with plenty of runnable examples and a list
-of known limitations), `ROADMAP.md` for the version plan, and `docs/LANGUAGE-0.1.md`/`docs/LANGUAGE-POC.md`
-for the frozen `0.1`/`0.1-poc`-era references. You'll find the **syntax grammar** in `langspec/`; the
+See `docs/LANGUAGE.md` for the full language reference (with plenty of runnable examples and a list
+of known limitations), `ROADMAP.md` for the version plan, and `docs/EARLIER-VERSIONS.md` for the `0.1`/`0.1-poc`/`0.2`
+references. You'll find the **syntax grammar** in `langspec/`; the
 **lexical grammar** and **precedence rules** are presented below.
 
 ## Lexical Grammar ##

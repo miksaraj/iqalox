@@ -1,5 +1,9 @@
 # Plan: getting to 0.1 (the bytecode compiler)
 
+> **Note (added in `0.3` Phase 6):** this log refers to files that are no longer kept in the tree
+> — `docs/LANGUAGE-0.1.md`, `docs/LANGUAGE-POC.md`, `langspec/versions/<n>/`, `langspec/archived/` —
+> by their old paths. Git tags preserve them; see [`EARLIER-VERSIONS.md`](EARLIER-VERSIONS.md).
+
 This is the `0.1` counterpart to `docs/PLAN-0.1-POC.md`: a living plan for
 the *real* implementation — a compiler frontend plus a bytecode VM backend —
 that supersedes the Python tree-walk interpreter once it's done. Like the

@@ -3,7 +3,7 @@
 (`docs/PLAN-0.3.md` §5); see that document's §4 feature checklist for
 what has actually landed so far.*
 
-This is `0.2`'s grammar (`langspec/versions/0.2/SYNTAX_GRAMMAR.md`) plus
+This is `0.2`'s grammar (`langspec/SYNTAX_GRAMMAR.md` at git tag `0.2.0`) plus
 everything `docs/PLAN-0.3.md` §1 has resolved for `0.3` so far: slices
 and full (multi-generator, guarded) list comprehensions. Negative
 indexing needed no new grammar at all (see below). This file will keep
@@ -141,12 +141,17 @@ own top-level grammar grew from `0.1`'s.
   top-level ambiguity versus cons: the second `|` only appears once a
   parse has already committed to the comprehension branch (having seen
   at least one `<-`), which cons parsing never reaches.
-* **Modules (`docs/PLAN-0.3.md` decisions 4-8, Phase 5).** A file is a
+* **Modules (`docs/PLAN-0.3.md` decisions 4-8, Phases 5-6).** A file is a
   module named by its path relative to the entry file's directory
   (`math/vector.iqx` → `math.vector`); there is no `module` declaration.
-  In `importItem` the **last** dotted segment is the imported member and
-  everything before it is the module path, so at least two segments are
-  required. `pub` is a **prefix** on a top-level declaration and exports
+  In the single-name `importItem` form the **last** dotted segment is the
+  imported member and everything before it is the module path, so at least
+  two segments are required. The brace form names the module path once and
+  then several members (it needs at least one module segment and one name,
+  no trailing comma); it is pure shorthand and expands to one import per
+  name. Newlines inside the braces are ignored so a long group can span
+  lines. There is deliberately no wildcard form (see `docs/LANGUAGE.md`
+  §17). `pub` is a **prefix** on a top-level declaration and exports
   it; it is a compile error anywhere else (class-member `pub` is
   unchanged and lives in `propertyDecl`/`method` below). `import` is only
   valid at the top level of a file, in any position. These are semantic
@@ -165,7 +170,10 @@ own top-level grammar grew from `0.1`'s.
                     | statement ;
 
     importDecl      → "import" importItem ( "," importItem )* ";?" ;
-    importItem      → IDENTIFIER ( "." IDENTIFIER )+ ( "as" IDENTIFIER )? ;
+    importItem      → IDENTIFIER ( "." IDENTIFIER )+ ( "as" IDENTIFIER )?
+                    | IDENTIFIER ( "." IDENTIFIER )* "." "{" importName
+                                 ( "," importName )* "}" ;
+    importName      → IDENTIFIER ( "as" IDENTIFIER )? ;
 
     classDecl       → "class" IDENTIFIER ( "extends" IDENTIFIER )?
                        ( "with" IDENTIFIER ( "," IDENTIFIER )* )?

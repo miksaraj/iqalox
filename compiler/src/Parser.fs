@@ -223,30 +223,69 @@ type private ParserState(tokens: Token[]) =
 
         PubStmt(keyword, declaration)
 
-    /// `import a.b.name [as alias] (, a.b.name [as alias])*`
-    /// (`docs/PLAN-0.3.md` decision 5). The last dotted segment is the
-    /// imported member; everything before it is the module path.
+    /// `import` followed by one or more comma-separated entries
+    /// (`docs/PLAN-0.3.md` decision 5), each either
+    ///
+    ///   a.b.name [as alias]               -- one name (the LAST dotted
+    ///                                        segment is the member), or
+    ///   a.b.{name [as alias], ...}        -- several names from one module
+    ///
+    /// The braces exist purely to avoid repeating the module path; a group
+    /// expands to one `ImportItem` per name, so nothing past the parser can
+    /// tell the two forms apart. A group may span lines (newlines inside the
+    /// braces are skipped), which is what makes a long list readable.
     member this.ImportDeclaration() : Stmt =
         let keyword = previous ()
         let items = ResizeArray<ImportItem>()
         let mutable more = true
 
+        // Newline tokens (lexeme "\n") are only skipped inside `{ }`; a real
+        // `;` is never swallowed.
+        let skipNewlines () =
+            while check Semicolon && (peek ()).Lexeme = "\n" do
+                advance () |> ignore
+
+        let parseAlias () =
+            if matchAny [ As ] then Some(consume Identifier "Expect alias name after 'as'.") else None
+
         while more do
             let segments = ResizeArray<Token>()
             segments.Add(consume Identifier "Expect module path after 'import'.")
-            while matchAny [ Dot ] do
-                segments.Add(consume Identifier "Expect identifier after '.' in import path.")
+            let mutable grouped = false
 
-            if segments.Count < 2 then
-                error segments.[0] "An import needs a module path and a name, e.g. 'import math.vector.transpose'."
+            while not grouped && matchAny [ Dot ] do
+                if check LeftBrace then
+                    grouped <- true
+                else
+                    segments.Add(consume Identifier "Expect identifier after '.' in import path.")
 
-            let alias =
-                if matchAny [ As ] then Some(consume Identifier "Expect alias name after 'as'.") else None
+            if grouped then
+                advance () |> ignore // the '{'
+                let moduleTokens = List.ofSeq segments
+                skipNewlines ()
 
-            items.Add
-                { Module = segments |> Seq.take (segments.Count - 1) |> List.ofSeq
-                  Name = segments.[segments.Count - 1]
-                  Alias = alias }
+                if check RightBrace then
+                    error (peek ()) "Expect at least one name inside '{ }' in an import."
+
+                let mutable moreNames = true
+
+                while moreNames do
+                    skipNewlines ()
+                    let name = consume Identifier "Expect an imported name."
+                    items.Add { Module = moduleTokens; Name = name; Alias = parseAlias () }
+                    skipNewlines ()
+                    moreNames <- matchAny [ Comma ]
+
+                skipNewlines ()
+                consume RightBrace "Expect '}' after the imported names." |> ignore
+            else
+                if segments.Count < 2 then
+                    error segments.[0] "An import needs a module path and a name, e.g. 'import math.vector.transpose'."
+
+                items.Add
+                    { Module = segments |> Seq.take (segments.Count - 1) |> List.ofSeq
+                      Name = segments.[segments.Count - 1]
+                      Alias = parseAlias () }
 
             more <- matchAny [ Comma ]
 

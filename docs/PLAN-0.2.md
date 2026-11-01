@@ -1,5 +1,9 @@
 # Plan: getting to 0.2
 
+> **Note (added in `0.3` Phase 6):** this log refers to files that are no longer kept in the tree
+> — `docs/LANGUAGE-0.1.md`, `docs/LANGUAGE-POC.md`, `langspec/versions/<n>/`, `langspec/archived/` —
+> by their old paths. Git tags preserve them; see [`EARLIER-VERSIONS.md`](EARLIER-VERSIONS.md).
+
 This is the `0.2` counterpart to `docs/PLAN-0.1.md`: a living plan for the
 next feature set on top of `0.1`'s compiler frontend (F#, `compiler/`) and
 bytecode VM backend (C++23, `vm/`). Like the `0.1` plan, this document
