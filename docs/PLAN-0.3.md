@@ -869,7 +869,7 @@ multi-line error lines, dead code) and 210 random constant-expression
 programs both ways and requires identical stdout, stderr and exit status:
 244 programs, no differences.
 
-**Phase 8 — Docs.** *(Revised during Phase 6: no fork.)* The original plan
+**Phase 8 — Docs, and a one-command runner — done.** *(Revised during Phase 6: no fork.)* The original plan
 was to fork `docs/LANGUAGE.md` into a frozen `docs/LANGUAGE-0.2.md`, but by
 then the file had been edited in place seven times for `0.3` — so the fork
 would have captured a half-`0.3` document, not `0.2` as released — and the
@@ -880,6 +880,21 @@ review `docs/LANGUAGE.md` end to end and drop its "in progress" marker;
 verify every top-level `langspec/examples/*.iqx` fixture end to end;
 `ROADMAP.md` marks `0.3` delivered and moves the active-target goalposts
 to `0.4`.
+
+*Added in Phase 8 at the repository owner's request:* running a program
+used to take two commands. `iqaloxc run <file.iqx>` now compiles to a
+temporary `.iqbc`, runs `iqaloxvm` on it (inheriting stdin/stdout/stderr,
+exiting with the VM's status; a compile failure never starts the VM; the
+temp file is always deleted), and finds the VM via `IQALOX_VM`, then next
+to the compiler executable, then the `PATH`. The bundle ships a two-line
+launcher, `iqalox` (sh) / `iqalox.cmd`, so users type `iqalox prog.iqx`.
+This is a first pass: no arguments are passed through to the program (the
+VM has no command-line-argument support yet; that is `1.0`), and no REPL.
+`release.yml` also now bundles the current top-level `langspec/examples/`
+(including `modules/`) rather than the stale `0.1` set. Verified by
+running all 16 examples through `iqaloxc run`, and an end-to-end check of a
+self-contained single-file `iqaloxc` + `iqaloxvm` + launcher laid out like
+the bundle, run from another directory.
 
 ## 6. Testing strategy
 

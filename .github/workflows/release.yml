@@ -4,8 +4,8 @@ name: Release
 # draft being created/edited) -- release notes themselves are written by
 # hand against the tag first (same process the 0.1.x-poc releases already
 # used), decoupled from this workflow's only job: build the two binaries
-# users actually need (iqaloxc, iqaloxvm) for each platform and attach
-# them as release assets.
+# users actually need (iqaloxc, iqaloxvm, plus the one-command `iqalox`
+# launcher) for each platform and attach them as release assets.
 on:
   release:
     types: [published]
@@ -62,13 +62,11 @@ jobs:
           # not the lowercase `iqaloxc` CLI name used everywhere else.
           cp dist/Iqaloxc "$name/iqaloxc"
           cp vm/build/iqaloxvm "$name/"
+          cp packaging/iqalox "$name/"
           cp README.md LICENSE "$name/"
-          # langspec/versions/0.1/examples/, not the top-level
-          # langspec/examples/: while 0.2 is mid-flight the top level holds
-          # its target-spec examples, which these 0.1 binaries can't run
-          # yet (docs/PLAN-0.2.md). Flip back to the top-level dir once a
-          # release actually ships 0.2.
-          cp -r langspec/versions/0.1/examples "$name/examples"
+          # The top-level langspec/examples/ is the current version's set,
+          # including the multi-file modules/ example.
+          cp -r langspec/examples "$name/examples"
           tar czf "$name.tar.gz" "$name"
           gh release upload "${{ github.event.release.tag_name }}" "$name.tar.gz" --clobber --repo "${{ github.repository }}"
 
@@ -85,12 +83,10 @@ jobs:
           # not the lowercase `iqaloxc` CLI name used everywhere else.
           Copy-Item dist/Iqaloxc.exe "$name/iqaloxc.exe"
           Copy-Item vm/build/Release/iqaloxvm.exe "$name/"
+          Copy-Item packaging/iqalox.cmd "$name/"
           Copy-Item README.md,LICENSE "$name/"
-          # langspec/versions/0.1/examples/, not the top-level
-          # langspec/examples/: while 0.2 is mid-flight the top level holds
-          # its target-spec examples, which these 0.1 binaries can't run
-          # yet (docs/PLAN-0.2.md). Flip back to the top-level dir once a
-          # release actually ships 0.2.
-          Copy-Item -Recurse langspec/versions/0.1/examples "$name/examples"
+          # The top-level langspec/examples/ is the current version's set,
+          # including the multi-file modules/ example.
+          Copy-Item -Recurse langspec/examples "$name/examples"
           Compress-Archive -Path $name -DestinationPath "$name.zip"
           gh release upload "${{ github.event.release.tag_name }}" "$name.zip" --clobber --repo "${{ github.repository }}"

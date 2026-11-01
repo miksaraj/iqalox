@@ -47,7 +47,7 @@ Implementation-agnostic material stays at the repository root:
 - `ROADMAP.md` — the version roadmap (0.1-poc onward).
 - `docs/` — implementation planning docs (`docs/PLAN-0.1-POC.md` for
   `0.1-poc`, `docs/PLAN-0.1.md` for `0.1`, `docs/PLAN-0.2.md` for `0.2`,
-  `docs/PLAN-0.3.md` for `0.3`, currently being implemented), plus
+  `docs/PLAN-0.3.md` for `0.3`), plus
   `docs/LANGUAGE.md`, the language reference for the current version (it
   marks what is new in `0.3`). Older references (`0.1-poc`, `0.1`, `0.2`)
   are not kept as separate files; `docs/EARLIER-VERSIONS.md` says which tag
@@ -396,17 +396,20 @@ used, and this section mirrors for `CLAUDE.md` itself); every top-level
 `compiler/`+`vm/` toolchain; `ROADMAP.md` marks `0.2` delivered and moves
 the active-target goalposts to `0.3`.
 
-## Architecture (`compiler/` + `vm/`, 0.3, in progress)
+## Architecture (`compiler/` + `vm/`, 0.3)
 
-See `docs/PLAN-0.3.md` (the decision log and per-phase writeups). Phases 1-7
-have landed: negative indices and slices; multi-generator/guarded list
+See `docs/PLAN-0.3.md` (the decision log and per-phase writeups). All eight phases
+have landed (`0.3` is delivered; `0.4` is next): negative indices and slices; multi-generator/guarded list
 comprehensions; unused-variable/-import warnings; multi-file compilation
 (`compiler/src/Modules.fs`: path-derived module names, an `import` statement,
 `pub` as the export marker, one `.iqbc` out, no `vm/` involvement beyond a
 file table in bytecode format v3 so runtime errors name their source file);
 an import-gated standard library; and a first set of compiler
 optimizations (`compiler/src/Optimizer.fs`: constant folding, global constant
-propagation, dead code; `iqaloxc --no-optimize` skips it). **Phase 6 supersedes the `0.2`
+propagation, dead code; `iqaloxc --no-optimize` skips it). Phase 8 (docs)
+also added `iqaloxc run <file>` (compile to a temp file, run `iqaloxvm`
+found next to it / on the PATH / via `IQALOX_VM`) and the `iqalox` /
+`iqalox.cmd` launchers in `packaging/`, which the release bundle ships. **Phase 6 supersedes the `0.2`
 description above of a textually-prepended prelude**: `compiler/src/Prelude.fs`
 is now `Stdlib.fs`, a set of built-in `std.*` modules (`std.vector`,
 `std.matrix`) a program must `import`; `print` is the only ambient name; every

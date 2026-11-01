@@ -1,16 +1,15 @@
-# The Iqalox Language (0.3, in progress)
+# The Iqalox Language (0.3)
 
 > **Older versions** (`0.1-poc`, `0.1`, `0.2`) are preserved by git tags
 > rather than as separate files — see
 > [`docs/EARLIER-VERSIONS.md`](EARLIER-VERSIONS.md) for which tag holds
 > each one's reference (this document as it stood at the `0.2` release is
 > `git show 0.2.0:docs/LANGUAGE.md`). This file describes the current,
-> actively-maintained version, and marks what is **new for `0.3`** on top
-> of `0.2`'s language as it goes.
+> current version, and marks what is **new for `0.3`** on top of `0.2`'s
+> language. (At the `0.3` release it is `git show 0.3.0:docs/LANGUAGE.md`.)
 
-This is the complete reference for Iqalox as implemented so far — `0.2`'s
-language plus the `0.3` features that have landed (each marked "new for
-`0.3`") — a
+This is the complete reference for Iqalox `0.3` — `0.2`'s language plus
+the `0.3` additions (each marked "new for `0.3`") — implemented as a
 compiler frontend (`compiler/`, F#) that compiles `.iqx` source to a
 bytecode file, executed by a stack-based virtual machine (`vm/`, C++23).
 It documents what the language **actually does today**, with runnable
@@ -27,8 +26,14 @@ log, and `docs/PLAN-0.1.md`/`docs/PLAN-0.1-POC.md` for the earlier
 versions' logs.
 
 Every code sample below is valid Iqalox and, unless marked otherwise,
-compiles and runs successfully via `compiler/src/Iqaloxc.fsproj` (or
-`iqaloxc`, once built) piped into `vm/build/iqaloxvm`. Longer, complete
+compiles and runs successfully. In a release bundle, run a program in one
+step with `iqalox program.iqx` (the launcher for `iqaloxc run program.iqx`,
+which compiles to a temporary bytecode file and runs `iqaloxvm` on it; the
+exit status is the VM's). The two-step form — `iqaloxc program.iqx out.iqbc`,
+then `iqaloxvm out.iqbc` — remains available. `iqaloxc` also runs a small
+optimizer (constant folding, propagation of never-assigned top-level
+`var`s with literal initializers, dead-code removal) that never changes a
+program's behavior; `--no-optimize` turns it off. Longer, complete
 programs live under `langspec/examples/*.iqx` — this version's
 active-target fixture set (see `langspec/README.md`).
 **Since `0.3` the standard library must be imported** ([§13](#13-the-standard-library)):

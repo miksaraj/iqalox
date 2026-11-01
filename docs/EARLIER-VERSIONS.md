@@ -21,6 +21,8 @@ git show <tag>:<path>
 | `0.1` grammar and README | `0.1.0` | `langspec/SYNTAX_GRAMMAR.md`, `langspec/README.md` |
 | `0.2` language reference | `0.2.0` | `docs/LANGUAGE.md` |
 | `0.2` grammar, README and examples | `0.2.0` | `langspec/SYNTAX_GRAMMAR.md`, `langspec/README.md`, `langspec/examples/` |
+| `0.3` language reference | `0.3.0` | `docs/LANGUAGE.md` |
+| `0.3` grammar, README and examples | `0.3.0` | `langspec/SYNTAX_GRAMMAR.md`, `langspec/README.md`, `langspec/examples/` |
 | Pre-renumbering planning snapshots (formerly `langspec/archived/`; their "0.1"/"0.2"/"0.3" are *not* today's versions — see the renumbering note in `ROADMAP.md`) | `0.2.0` | `langspec/archived/` |
 
 Example: `git show 0.2.0:docs/LANGUAGE.md`.
