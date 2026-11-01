@@ -23,8 +23,7 @@ It reflects one renumbering decision made when this document was written:
 | `0.4`         | `0.5`         |
 | `0.5`         | `0.6`         |
 | `0.6`         | `0.7`         |
-| `0.7`         | `0.8`         |
-| `1.0`         | `1.0` (unchanged name; now its own milestone, see below) |
+| `0.7` / `1.0` | `0.8` / `1.0` |
 
 `1.0` stays the name of the eventual stable release regardless of how many
 pre-1.0 minor versions it takes to get there. As of the revision that added
@@ -278,7 +277,7 @@ Standard library, part 4 of 5:
   directories, metadata retrieval
 - Fifth set of compiler optimizations
 
-### 0.8 *(formerly `0.7`)*
+### 0.8 *(formerly `0.7` / `1.0`)*
 
 Standard library, part 5 of 5 (the last of the *categories* — every one in
 the vision below is allocated to a version by this point):
@@ -289,7 +288,7 @@ the vision below is allocated to a version by this point):
   environment variables, OS interaction, subprocesses
 - Sixth set of compiler optimizations
 
-### 1.0 — the stability line
+### 1.0
 
 **Goal: a language in which its own compiler *could* be written.** `1.0`
 delivers everything such a self-hosted compiler needs. Actually doing the
