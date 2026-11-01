@@ -24,10 +24,13 @@ It reflects one renumbering decision made when this document was written:
 | `0.4`         | `0.5`         |
 | `0.5`         | `0.6`         |
 | `0.6`         | `0.7`         |
-| `0.7` / `1.0` | `0.8` / `1.0` |
+| `0.7`         | `0.8`         |
+| `1.0`         | `1.0` (unchanged name; now its own milestone, see below) |
 
 `1.0` stays the name of the eventual stable release regardless of how many
-pre-1.0 minor versions it takes to get there.
+pre-1.0 minor versions it takes to get there. As of the revision that added
+the `1.0` and `1.X` entries below, `1.0` is also the **stability line**: the
+first release that promises backward compatibility.
 
 ## Versions
 
@@ -206,13 +209,36 @@ leave as-is permanently, not revisited here or in any later version; see
 
 ### 0.4 *(formerly `0.3`)*
 
-Standard library, part 1 of 5 (see "Standard library vision" below for
-the full category breakdown and how it maps onto `0.4`-`0.8`):
+Two language-level models first, then standard library part 1 of 5 (see
+"Standard library vision" below for the full category breakdown and how it
+maps onto `0.4`-`0.8`). The two models are here, not later, because the
+math and string libraries below are built directly on them and because
+`1.0` is the stability line (see "1.0") — anything that changes what an
+existing program means has to ship before it. Both were decided with the
+repository owner while planning the `1.0`/`1.X` entries.
 
+- **Numeric model: a separate, exact, arbitrary-precision integer type.**
+  `0.1`-`0.3` have IEEE doubles only (exact up to 2^53, no integer
+  division, no bitwise operators). `0.4` adds integers as their own type,
+  distinct from floats, with integer division (`//`) and bitwise operators
+  that apply to integers. Deliberately a breaking change, made now rather
+  than later because of the stability line. Details to be settled and asked
+  about when `0.4` planning starts, not decided here: how integer vs. float
+  literals are told apart, what `/` does on two integers, mixed
+  integer/float arithmetic and equality (`1 == 1.0`), printing, and how
+  vector indices and `length` fit in.
+- **String model: strings are sequences of Unicode code points.** `s[i]`
+  is a one-character string (there is no separate `char` type), `length`
+  counts code points, and the string library below reports positions in the
+  same unit; `ord`/`chr`-style helpers convert between a character and its
+  code. This is the "character-level string access" a self-hosted compiler
+  needs (see "1.0"); it lands here so that search/split/regex and indexing
+  agree from the start.
 - String manipulation standard library — concatenation, search, split,
   format, regex
 - Mathematical operations standard library — arithmetic, trigonometry,
-  logarithms, random number generation, rounding
+  logarithms, random number generation, rounding (`floor`/`round` return
+  integers)
 - Second set of compiler optimizations
 
 ### 0.5 *(formerly `0.4`)*
@@ -220,8 +246,10 @@ the full category breakdown and how it maps onto `0.4`-`0.8`):
 Standard library, part 2 of 5:
 
 - Data structures standard library, the rest of it — lists,
-  dictionaries/maps, stacks, queues, sets (arrays/vectors already shipped
-  `0.2`)
+  dictionaries/maps, stacks, queues, sets, and a **priority queue/heap**
+  (arrays/vectors already shipped `0.2`). Dictionary/set key semantics
+  (equality is already structural, so keys such as `[x, y]` coordinate
+  pairs should work by value) are to be settled when `0.5` planning starts.
 - I/O standard library — file and stream I/O, console interaction
 - Disallow unused variables — **compile-time error** (upgraded from
   `0.3`'s warning)
@@ -246,16 +274,93 @@ Standard library, part 4 of 5:
   directories, metadata retrieval
 - Fifth set of compiler optimizations
 
-### 0.8 / 1.0 *(formerly `0.7` / `1.0`)*
+### 0.8 *(formerly `0.7`)*
 
-Standard library, part 5 of 5 (the last of it — every category in the
-vision below is allocated to a version by this point):
+Standard library, part 5 of 5 (the last of the *categories* — every one in
+the vision below is allocated to a version by this point):
 
 - Concurrency and threading standard library — threads, locks,
   semaphores, synchronization primitives
 - System interaction standard library — executing system commands,
   environment variables, OS interaction, subprocesses
-- Sixth (and possibly final) set of compiler optimizations
+- Sixth set of compiler optimizations
+
+### 1.0 — the stability line
+
+**Goal: a language in which its own compiler *could* be written.** `1.0`
+delivers everything such a self-hosted compiler needs. Actually doing the
+rewrite is deliberately **not on this roadmap** (decided with the
+repository owner) — `1.0` makes it possible, and whether it is ever done is
+left open.
+
+**Stability line.** `1.0` is the first release with a backward-compatibility
+promise: from `1.0` on, programs that run keep running, and the `1.X`
+releases may only *add*. Pre-`1.0` has treated backward compatibility as a
+non-goal throughout (breaking changes accepted every version); `1.0` ends
+that. Consequence for planning: anything that could change what an existing
+program means must be settled and shipped **in or before `1.0`**, which is
+why the numeric and string models are scheduled in `0.4`, and why `1.0`'s
+own exit criteria include an audit for any remaining breaking-change
+candidates (open design questions, "ideas under consideration" that would
+break rather than add, error-handling syntax from `0.6`, ...).
+
+What `1.0` contains:
+
+- **Character-level string access** — delivered by `0.4`'s string model;
+  `1.0` verifies it is sufficient for a scanner (iteration, comparison,
+  character codes, substrings, number parsing).
+- **Binary output** — byte-oriented file I/O (writing and reading byte
+  sequences), including turning integers and IEEE-754 doubles into their
+  bytes; needed to emit the `.iqbc` bytecode format. Designed to sit
+  alongside `0.5`'s text I/O so the two APIs are consistent.
+- **Command-line arguments** — an extension of `0.8`'s system-interaction
+  library.
+- **More recursion depth.** The VM currently caps the call stack at 1,024
+  frames (measured: a 900-deep recursion works, 5,000 fails with "Stack
+  overflow."), with no way to raise it. The *mechanism* is a language
+  question and must be settled before `1.0` — a larger or growable limit is
+  a pure implementation change, whereas guaranteed tail calls would be a
+  semantic promise to every program from the stability line on.
+- **Seventh set of compiler optimizations, plus VM-level performance
+  work**, to close the speed gap. Measured at `0.3` on a Release build:
+  a 10M-iteration loop takes 2.9 s (CPython: 1.27 s), `fib(30)` 0.59 s
+  (CPython: 0.14 s), and `std.vector.sort` on 5,000 numbers 4.3 s (an
+  O(n²) insertion sort written in Iqalox). The target proposed here, not
+  yet confirmed by the repository owner: **CPython parity on the baseline
+  microbenchmarks** (loops, calls, vector/dictionary operations, sort).
+  Candidates identified so far: resolving globals to slots instead of a
+  hash lookup per access, cheaper opcode dispatch and value
+  representation, and a re-entrant "call this closure from native code"
+  primitive in the VM, which would let `sort`/`map`/`filter` be fast natives
+  instead of Iqalox source. Compiler passes alone are expected to be a
+  small part of the gain; the VM is where most of the time goes.
+- *(Engineering, not a language item:)* `vm/CMakeLists.txt` defaults to a
+  Debug build, which is roughly 15× slower than Release; the default should
+  become Release so that a plain build is not misleadingly slow.
+
+### 1.X — additive releases toward Advent-of-Code readiness
+
+Goal: Iqalox can solve the hardest Advent of Code puzzles. By then the
+blockers that would *break* programs (exact integers, bitwise operators,
+integer division, string indexing) have already shipped before `1.0`, and
+heap/priority-queue and dictionary support in `0.5`; what remains is
+additive, so it fits the post-stability-line rule.
+
+- **`1.1` — ergonomics and gaps found by actually solving puzzles.**
+  Additive language conveniences that puzzle code leans on — candidates
+  (none decided; see "Language feature ideas") are destructuring
+  assignment, multiple return values/tuples, and variadics — plus whatever
+  standard-library holes a real corpus of solved puzzles exposes.
+- **`1.2` — performance on the hardest workloads and an acceptance suite.**
+  An eighth set of compiler optimizations and further VM work driven by
+  measurements on real puzzles, and an end-to-end acceptance suite: a
+  defined corpus of Advent of Code puzzles (the puzzle set and per-puzzle
+  time budget to be fixed when `1.1` starts) that must run to the correct
+  answer. Puzzles that need very large exact integers, heavy search, or
+  deep recursion are included on purpose.
+
+More `1.X` releases can be added if the acceptance suite shows the work does
+not fit in two; nothing here reopens the stability line.
 
 ## Language feature ideas under consideration
 
@@ -286,9 +391,20 @@ committed to a specific version yet:
   already ships. See `docs/PLAN-0.2.md` §2 item 2 and Phase 8's own entry
   in §5 for the full reasoning.
 
+- **Destructuring assignment, multiple return values / tuples.** Raised
+  while scoping Advent-of-Code readiness (`1.1`): returning and unpacking
+  several values (grid coordinates, `(x, y)` pairs) currently means
+  building and indexing a vector by hand. Purely additive, so allowed
+  after the stability line; shape undecided.
+- **Guaranteed tail calls** — one possible answer to `1.0`'s "more
+  recursion depth" item. A semantic guarantee rather than an
+  implementation detail, so it must be decided before `1.0` if it is
+  wanted at all.
+
 ## Compiler optimization concepts under consideration
 
-To be scheduled across the 0.3–0.8 optimization passes above, roughly in
+To be scheduled across the 0.3–0.8 optimization passes above, `1.0`'s seventh
+and `1.2`'s eighth, roughly in
 order of expected impact/ease, but not committed to any specific version yet:
 
 - Constant propagation
@@ -301,6 +417,10 @@ order of expected impact/ease, but not committed to any specific version yet:
 - Loop unrolling
 
 See also: <https://en.wikipedia.org/wiki/Optimizing_compiler>
+
+Note that much of the speed `1.0` and `1.2` want is **VM-level** work, not
+compiler passes (value representation, global-variable access, dispatch, a
+re-entrant call primitive for natives) — see "1.0".
 
 ## Architecture note for the eventual bytecode implementation
 
@@ -342,4 +462,7 @@ later):
     variables, OS interaction, subprocesses (`0.8`)
 
 Module support itself (`0.3`, brought forward from `0.5` — see above) is
-infrastructure this buildout depends on, not a category of its own.
+infrastructure this buildout depends on, not a category of its own. `1.0`
+adds two cross-cutting items that extend categories above rather than
+forming new ones: byte-oriented I/O (alongside category 4) and command-line
+arguments (alongside category 10).
