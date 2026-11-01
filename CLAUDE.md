@@ -398,13 +398,15 @@ the active-target goalposts to `0.3`.
 
 ## Architecture (`compiler/` + `vm/`, 0.3, in progress)
 
-See `docs/PLAN-0.3.md` (the decision log and per-phase writeups). Phases 1-6
+See `docs/PLAN-0.3.md` (the decision log and per-phase writeups). Phases 1-7
 have landed: negative indices and slices; multi-generator/guarded list
 comprehensions; unused-variable/-import warnings; multi-file compilation
 (`compiler/src/Modules.fs`: path-derived module names, an `import` statement,
 `pub` as the export marker, one `.iqbc` out, no `vm/` involvement beyond a
 file table in bytecode format v3 so runtime errors name their source file);
-and an import-gated standard library. **Phase 6 supersedes the `0.2`
+an import-gated standard library; and a first set of compiler
+optimizations (`compiler/src/Optimizer.fs`: constant folding, global constant
+propagation, dead code; `iqaloxc --no-optimize` skips it). **Phase 6 supersedes the `0.2`
 description above of a textually-prepended prelude**: `compiler/src/Prelude.fs`
 is now `Stdlib.fs`, a set of built-in `std.*` modules (`std.vector`,
 `std.matrix`) a program must `import`; `print` is the only ambient name; every

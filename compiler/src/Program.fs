@@ -59,7 +59,9 @@ let private parseBuiltin (name: string) (source: string) : Result<Ast.Stmt list,
 
 [<EntryPoint>]
 let main argv =
-    match argv with
+    let optimize = not (Array.contains "--no-optimize" argv)
+
+    match argv |> Array.filter (fun a -> a <> "--no-optimize") with
     | [| inputPath; outputPath |] ->
         let entryFull = IO.Path.GetFullPath inputPath
         let rootDir = IO.Path.GetDirectoryName entryFull
@@ -106,7 +108,8 @@ let main argv =
                             eprintfn "%s Error: %s" (label d e.Token.Line) e.Message
                     65
                 else
-                    let chunk, fileNames, codegenErrors = compileSegments linked.Segments
+                    let segments = if optimize then Optimizer.optimize linked.Segments else linked.Segments
+                    let chunk, fileNames, codegenErrors = compileSegmentsWith optimize segments
 
                     if not codegenErrors.IsEmpty then
                         for e in codegenErrors do
@@ -116,5 +119,5 @@ let main argv =
                         writeWithFiles fileNames chunk outputPath
                         0
     | _ ->
-        eprintfn "Usage: iqaloxc <input .iqx file> <output bytecode file>"
+        eprintfn "Usage: iqaloxc [--no-optimize] <input .iqx file> <output bytecode file>"
         64
