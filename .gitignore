@@ -1,2 +1,5 @@
 # IntelliJ IDEA
 .idea
+
+# Local VM build directories
+vm/build-*/

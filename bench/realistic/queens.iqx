@@ -1,0 +1,36 @@
+import std.vector.push
+
+# Count the solutions of the n-queens puzzle by backtracking.
+var boardSize = 9
+var debug = false
+var none = 0 - 1
+
+var columns = []
+for (var i mut = 0; i < boardSize; ++i) {
+    push columns, none
+}
+var solutions mut = 0
+
+fun safe(row, col) {
+    var ok mut = true
+    for (var r mut = 0; r < row; ++r) {
+        var c = columns[r]
+        var clash = (c == col) or (c - col == r - row) or (c - col == row - r)
+        ok = clash ? false : ok
+    }
+    return ok
+}
+
+fun place(row) {
+    debug ? print row : nil
+    row == boardSize ? ++solutions : nil
+    for (var col mut = 0; row < boardSize and col < boardSize; ++col) {
+        var fits = safe row, col
+        columns[row] = fits ? col : none
+        fits ? place (row + 1) : nil
+        columns[row] = none
+    }
+}
+
+place 0
+print solutions

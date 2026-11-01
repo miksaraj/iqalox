@@ -1,0 +1,18 @@
+# Convert a long run of second counts to hours, minutes and seconds.
+var secondsPerMinute = 60
+var minutesPerHour = 60
+var secondsPerHour = secondsPerMinute * minutesPerHour
+var hoursPerDay = 24
+var secondsPerDay = secondsPerHour * hoursPerDay
+
+var checksum mut = 0
+for (var t mut = 0; t < 400000; ++t) {
+    var seconds = t * 7
+    var days = (seconds - seconds % secondsPerDay) / secondsPerDay
+    var rest = seconds % secondsPerDay
+    var hours = (rest - rest % secondsPerHour) / secondsPerHour
+    var leftover = rest % secondsPerHour
+    var minutes = (leftover - leftover % secondsPerMinute) / secondsPerMinute
+    checksum = checksum + days + hours * 3 + minutes * 5 + leftover % secondsPerMinute
+}
+print checksum

@@ -1,0 +1,30 @@
+import std.vector.push
+
+# 0/1 knapsack by dynamic programming over a one-dimensional table.
+var itemCount = 150
+var capacity = 4000
+
+var weights = []
+var values = []
+var seed mut = 99
+for (var i mut = 0; i < itemCount; ++i) {
+    seed = (seed * 1103 + 12345) % 100003
+    push weights, (5 + seed % 90)
+    seed = (seed * 1103 + 12345) % 100003
+    push values, (10 + seed % 200)
+}
+
+var best = []
+for (var c mut = 0; c <= capacity; ++c) {
+    push best, 0
+}
+
+for (var item mut = 0; item < itemCount; ++item) {
+    var w = weights[item]
+    var v = values[item]
+    for (var c mut = capacity; c >= w; --c) {
+        var candidate = best[c - w] + v
+        best[c] = (candidate > best[c]) ? candidate : best[c]
+    }
+}
+print best[capacity]

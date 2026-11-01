@@ -1,0 +1,12 @@
+import std.vector.{push, length}
+
+# Build a 1M-element vector, then sum it by index.
+var v = []
+for (var i mut = 0; i < 1000000; ++i) {
+    push v, i
+}
+var total mut = 0
+for (var j mut = 0; j < length(v); ++j) {
+    total = total + v[j]
+}
+print total

@@ -1,0 +1,6 @@
+# 10M iterations of a loop accumulating into a top-level variable.
+var sum mut = 0
+for (var i mut = 0; i < 10000000; ++i) {
+    sum = sum + i % 7
+}
+print sum

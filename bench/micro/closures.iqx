@@ -1,0 +1,11 @@
+# Closure creation and calls through an upvalue.
+fun makeCounter() {
+    var count mut = 0
+    return () -> (count = count + 1)
+}
+var next = makeCounter()
+var last mut = 0
+for (var i mut = 0; i < 2000000; ++i) {
+    last = next()
+}
+print last
