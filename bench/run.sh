@@ -11,8 +11,7 @@
 set -u
 RUNS="${1:-10}"
 VM="${2:-vm/build-rel/iqaloxvm}"
-shift 2 2>/dev/null || true
-CC=("${@:-dotnet compiler/src/bin/Release/net10.0/Iqaloxc.dll}")
+if [ $# -gt 2 ]; then shift 2; CC=("$@"); else CC=(dotnet compiler/src/bin/Release/net10.0/Iqaloxc.dll); fi
 OUT="$(mktemp -d)"
 trap 'rm -rf "$OUT"' EXIT
 
@@ -28,7 +27,7 @@ for src in bench/micro/*.iqx bench/realistic/*.iqx; do
   for mode in optimized baseline; do
     flag=""; [ "$mode" = baseline ] && flag="--no-optimize"
     # shellcheck disable=SC2086
-    ${CC[*]} $flag "$src" "$OUT/$name.$mode.iqbc" 2>/dev/null || { echo "$name $mode: compile failed"; continue; }
+    "${CC[@]}" $flag "$src" "$OUT/$name.$mode.iqbc" 2>/dev/null || { echo "$name $mode: compile failed"; continue; }
   done
   [ -f "$OUT/$name.baseline.iqbc" ] || cp "$OUT/$name.optimized.iqbc" "$OUT/$name.baseline.iqbc"
   a=$("$VM" "$OUT/$name.optimized.iqbc" 2>&1); b=$("$VM" "$OUT/$name.baseline.iqbc" 2>&1)

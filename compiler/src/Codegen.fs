@@ -54,6 +54,7 @@
 /// see `CompileFor`'s explicit reset.
 module Iqalox.Codegen
 
+open System
 open Iqalox.Token
 open Iqalox.Ast
 open Iqalox.Bound
@@ -222,7 +223,7 @@ type private FunctionState(initialStackDepth: int) =
 
     member _.AddNumberConstant(n: float) : int =
         match constants |> Seq.tryFindIndex (function
-            | NumberConstant existing -> existing = n
+            | NumberConstant existing -> BitConverter.DoubleToInt64Bits existing = BitConverter.DoubleToInt64Bits n
             | _ -> false) with
         | Some i -> i
         | None ->
@@ -248,7 +249,7 @@ type private FunctionState(initialStackDepth: int) =
           Lines = lines.ToArray()
           Files = files.ToArray() }
 
-type private Codegen() =
+type private Codegen(elideEpilogue: bool) =
     let errors = ResizeArray<CodegenError>()
     let mutable state = FunctionState(0)
     // The program's source-file table (`Bytecode.fs`' "files"), and the
@@ -550,8 +551,16 @@ type private Codegen() =
         // end without an explicit `return` -- matching poc's
         // `IqaloxFunction.call`, which returns `None` when no
         // `ReturnSignal` was ever raised.
-        state.Emit Nil |> ignore
-        state.Emit Return |> ignore
+        // With `elideEpilogue` (`docs/PLAN-0.3.md` Phase 7), a body whose
+        // last statement is itself a `return` needs no fall-off-the-end
+        // `nil; return` after it: nothing can jump past that final Return.
+        let endsInReturn =
+            match List.tryLast decl.Body with
+            | Some(BReturnStmt _) -> true
+            | _ -> false
+        if not (elideEpilogue && endsInReturn) then
+            state.Emit Nil |> ignore
+            state.Emit Return |> ignore
 
         let chunk = state.ToChunk()
         state <- enclosing
@@ -738,7 +747,7 @@ type private Codegen() =
 /// zero-upvalue function. Never throws; codegen errors so far are limited
 /// to `break`/`continue` used outside any loop.
 let compile (stmts: BoundStmt list) : Chunk * CodegenError list =
-    let codegen = Codegen()
+    let codegen = Codegen(false)
     let chunk = codegen.CompileProgram stmts
     chunk, codegen.Errors
 
@@ -747,8 +756,14 @@ let compile (stmts: BoundStmt list) : Chunk * CodegenError list =
 /// execution order), and the result also carries the file table to hand
 /// `Bytecode.writeWithFiles`. An instruction's file is whichever segment
 /// its statement came from; the top-level epilogue is attributed to the
-/// last one.
-let compileSegments (segments: (string * BoundStmt list) list) : Chunk * string[] * CodegenError list =
-    let codegen = Codegen()
+/// last one. With `elideEpilogue`, also drops the redundant `nil; return`
+/// after a function body that already ends in `return`
+/// (`docs/PLAN-0.3.md` Phase 7).
+let compileSegmentsWith (elideEpilogue: bool) (segments: (string * BoundStmt list) list) : Chunk * string[] * CodegenError list =
+    let codegen = Codegen(elideEpilogue)
     let chunk = codegen.CompileSegments segments
     chunk, codegen.FileNames, codegen.Errors
+
+/// `compileSegmentsWith false`: no optimizations.
+let compileSegments (segments: (string * BoundStmt list) list) : Chunk * string[] * CodegenError list =
+    compileSegmentsWith false segments

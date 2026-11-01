@@ -35,6 +35,9 @@ iqaloxc langspec/examples/classes.iqx classes.iqbc
 iqaloxvm classes.iqbc
 ```
 
+`iqaloxc` runs a small optimizer by default (constant folding, constant propagation of
+unchanged top-level `var`s, dead-code removal); pass `--no-optimize` before the paths to skip it.
+
 (If you built from source instead of downloading a release, replace `iqaloxc` with
 `dotnet run --project compiler/src/Iqaloxc.fsproj --` and `iqaloxvm` with `vm/build/iqaloxvm`.)
 

@@ -195,9 +195,10 @@ questions, and phased sequencing:
   an import. Names are imported bare (`import std.vector.map`), not
   qualified — the `Vector.map` spelling this entry originally floated was
   dropped along with qualified references generally.
-- First set of compiler optimizations (see below) — proposed as constant
-  propagation plus dead code elimination (`docs/PLAN-0.3.md` §2 item 2),
-  not yet separately confirmed.
+- First set of compiler optimizations (see below) — constant folding,
+  global constant propagation and dead code elimination, measured in
+  `docs/PLAN-0.3.md` Phase 7 (up to ~14% fewer executed instructions on
+  programs that name their constants, none on the rest).
 
 Comma-as-no-parens-multi-argument-call-separator (`push v, 4`) was also
 raised for reconsideration while reviewing Phase 5's array-stdlib

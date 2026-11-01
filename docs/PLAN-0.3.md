@@ -240,7 +240,7 @@ each one, verified via new tests (§6).
 | Unused-variable compile-time warning | §2.3 | Done |
 | Module support (file-based, `import`, compile-time-only) | §1.4-9 | Done |
 | Array-manipulation stdlib behind imports | §2.1 | Done |
-| First set of compiler optimizations | §2.2 | Not started |
+| First set of compiler optimizations | §2.2 | Done |
 
 ## 5. Suggested sequencing
 
@@ -797,11 +797,77 @@ Phase 4/5 entries above describe the module machinery as first built (a
 textually merged prelude, an unqualified entry module); read them as history
 — Phase 6 is what changed those two things.
 
-**Phase 7 — First set of compiler optimizations.** Proposed: constant
-propagation plus dead code elimination (open question 2). Needs its own
-correctness-focused test strategy (§6) beyond the usual instruction-
-sequence assertions, since the goal is identical *behavior* via smaller/
-faster bytecode, not new behavior.
+**Phase 7 — First set of compiler optimizations — done.** Open question 2's
+proposal was adopted as written (constant propagation plus dead code
+elimination), and the repository owner scoped the phase to *compiler*
+work only: VM-level performance (global-slot resolution, dispatch) was
+deliberately left for `1.0`.
+
+*Method.* The benchmark corpus (`bench/micro/`: seven microbenchmarks;
+`bench/realistic/`: eight Advent-of-Code-style programs with named
+constants, helper functions, grids and DP) and the harness
+(`bench/run.sh`) were committed **before** any optimizer code existed, so
+the measurement could not be tuned to the result. Wall-clock time is too
+noisy here (the min/median spread alone is 10%+), so the headline metric
+is executed CPU instructions under `valgrind --tool=callgrind`, which is
+deterministic. The VM is built **Release** for all numbers (the CMake
+default was Debug, ~15× slower; it is now Release, which is why the
+first benchmark attempt reported 43 s for a loop that takes 2.9 s).
+
+*What landed* (`compiler/src/Optimizer.fs`, run between
+`Modules.linkModules` and `Codegen`; `iqaloxc --no-optimize` skips it):
+
+- Constant folding on literals: `+ - * /` (not when the result is
+  non-finite, nor `/` by zero), comparisons, same-type `==`/`!=`, unary
+  `-`/`!`, `??` with a literal left side, and `and`/`or`/ternary whose
+  condition is a `nil`/`bool` literal. `%` and `^` are never folded
+  (duplicating their VM semantics is not worth the risk); a division by
+  zero stays a runtime error.
+- Global constant propagation: a top-level `var x = <literal>` that is never
+  assigned/`++`/`--`'d anywhere in the program replaces every read that is
+  *textually after* the declaration. The "after" rule is what keeps a
+  read-before-definition raising "Undefined variable" exactly as before.
+  The declaration is kept, and chains work (`var b = a * 3` folds, then
+  becomes a constant too). Locals are not propagated: `GetLocal` and
+  `Constant` cost the same.
+- Dead code: statements after an unconditional `return`, bare-literal
+  expression statements (what a folded `debug ? print x : nil` leaves), and
+  the `nil; return` epilogue after a body that already ends in `return`
+  (`Codegen.compileSegmentsWith`).
+- A bug fix this exposed: `FunctionState.AddNumberConstant` deduplicated
+  with `=`, which treats `0.0` and `-0.0` as the same constant; it now
+  compares bits.
+
+*Results* (callgrind instructions, `--no-optimize` → default):
+
+| program | change |
+|---|---|
+| timeconv (named unit constants) | −13.6% |
+| life (`width`/`height`/`alive`/`dead` constants) | −10.4% |
+| sieve | −4.8% |
+| matmul | −2.7% |
+| queens | −1.8% |
+| collatz, knapsack | ≈0 (−0.05%, −0.02%) |
+| micro (loops, fib, closures, methods, vector ops) | ≈0 in instruction terms; bytecode 0–2% smaller |
+
+The honest reading: the pass pays off exactly where a program names its
+constants (`var width = 60` read in a hot loop), a few percent to ~14%;
+it does nothing for code that already uses literals or locals, and it
+does not touch what actually dominates the microbenchmarks — every
+top-level variable access is a `GET_GLOBAL` string-hash lookup in the VM.
+That is the real lever and is `1.0` work. Wall-clock medians moved by
+amounts inside the run-to-run noise except where the instruction counts
+also moved. One planned side measurement (cost of the `module::name`
+qualified global names against the Phase 5 build) was not done.
+
+*Correctness.* `compiler/tests/OptimizerTests.fs` asserts the rewrites and,
+as importantly, the non-rewrites (assigned/incremented globals, reads
+before the declaration, division by zero, overflow, `-0`).
+`scripts/optimizer-differential.sh` compiles every example, benchmark, four
+hand-written error cases (division by zero, read-before-define,
+multi-line error lines, dead code) and 210 random constant-expression
+programs both ways and requires identical stdout, stderr and exit status:
+244 programs, no differences.
 
 **Phase 8 — Docs.** *(Revised during Phase 6: no fork.)* The original plan
 was to fork `docs/LANGUAGE.md` into a frozen `docs/LANGUAGE-0.2.md`, but by
