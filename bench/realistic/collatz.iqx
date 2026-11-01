@@ -1,0 +1,23 @@
+# Longest Collatz chain below a limit.
+var limit = 30000
+var firstStart = 1
+
+fun chainLength(start) {
+    var n mut = start
+    var steps mut = 1
+    for (; n != 1;) {
+        n = (n % 2 == 0) ? n / 2 : 3 * n + 1
+        ++steps
+    }
+    return steps
+}
+
+var bestStart mut = firstStart
+var bestLength mut = 1
+for (var s mut = firstStart; s < limit; ++s) {
+    var len = chainLength s
+    bestStart = (len > bestLength) ? s : bestStart
+    bestLength = (len > bestLength) ? len : bestLength
+}
+print bestStart
+print bestLength

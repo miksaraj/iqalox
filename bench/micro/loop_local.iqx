@@ -1,0 +1,9 @@
+# The same loop inside a function, so the accumulator is a local.
+fun run(n) {
+    var sum mut = 0
+    for (var i mut = 0; i < n; ++i) {
+        sum = sum + i % 7
+    }
+    return sum
+}
+print (run 10000000)

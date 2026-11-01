@@ -1,0 +1,26 @@
+import std.vector.push
+
+# Sieve of Eratosthenes up to a limit, then count the primes.
+var size = 300000
+var isPrime = []
+for (var i mut = 0; i < size; ++i) {
+    push isPrime, true
+}
+isPrime[0] = false
+isPrime[1] = false
+
+fun markMultiples(p) {
+    for (var m mut = p * p; m < size; m = m + p) {
+        isPrime[m] = false
+    }
+}
+
+for (var p mut = 2; p * p < size; ++p) {
+    isPrime[p] ? markMultiples(p) : nil
+}
+
+var count mut = 0
+for (var k mut = 0; k < size; ++k) {
+    count = isPrime[k] ? count + 1 : count
+}
+print count

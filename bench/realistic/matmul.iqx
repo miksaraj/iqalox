@@ -1,0 +1,39 @@
+import std.vector.push
+
+# Square matrix product written out by hand with nested loops.
+var n = 90
+
+fun makeMatrix(offset) {
+    var rows = []
+    for (var i mut = 0; i < n; ++i) {
+        var row = []
+        for (var j mut = 0; j < n; ++j) {
+            push row, ((i * n + j + offset) % 10)
+        }
+        push rows, row
+    }
+    return rows
+}
+
+fun multiply(a, b) {
+    var result = []
+    for (var i mut = 0; i < n; ++i) {
+        var row = []
+        for (var j mut = 0; j < n; ++j) {
+            var cell mut = 0
+            for (var k mut = 0; k < n; ++k) {
+                cell = cell + a[i][k] * b[k][j]
+            }
+            push row, cell
+        }
+        push result, row
+    }
+    return result
+}
+
+var product = multiply (makeMatrix 1), (makeMatrix 7)
+var trace mut = 0
+for (var i mut = 0; i < n; ++i) {
+    trace = trace + product[i][i]
+}
+print trace

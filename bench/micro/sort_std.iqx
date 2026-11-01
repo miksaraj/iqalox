@@ -1,0 +1,11 @@
+import std.vector.{push, sort, length}
+
+# std.vector.sort on 2,000 pseudo-random numbers (an O(n^2) insertion sort).
+var v = []
+var x mut = 12345
+for (var i mut = 0; i < 2000; ++i) {
+    x = (x * 1103 + 12345) % 100003
+    push v, x
+}
+var s = sort (a, b) -> a < b, v
+print (length s)

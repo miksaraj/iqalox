@@ -1,0 +1,61 @@
+import std.vector.push
+
+# Conway's Game of Life on a wrapping grid.
+var width = 60
+var height = 60
+var generations = 40
+var alive = 1
+var dead = 0
+
+fun makeGrid() {
+    var grid = []
+    var seed mut = 4242
+    for (var y mut = 0; y < height; ++y) {
+        var row = []
+        for (var x mut = 0; x < width; ++x) {
+            seed = (seed * 1103 + 12345) % 100003
+            push row, ((seed % 3 == 0) ? alive : dead)
+        }
+        push grid, row
+    }
+    return grid
+}
+
+fun neighbors(grid, x, y) {
+    var total mut = 0
+    for (var dy mut = -1; dy <= 1; ++dy) {
+        for (var dx mut = -1; dx <= 1; ++dx) {
+            var skip = (dx == 0 and dy == 0)
+            total = skip ? total : total + grid[(y + dy + height) % height][(x + dx + width) % width]
+        }
+    }
+    return total
+}
+
+fun step(grid) {
+    var next = []
+    for (var y mut = 0; y < height; ++y) {
+        var row = []
+        for (var x mut = 0; x < width; ++x) {
+            var n = neighbors grid, x, y
+            var isAlive = grid[y][x] == alive
+            var survives = isAlive and (n == 2 or n == 3)
+            var born = (isAlive == false) and n == 3
+            push row, ((survives or born) ? alive : dead)
+        }
+        push next, row
+    }
+    return next
+}
+
+var grid mut = makeGrid()
+for (var g mut = 0; g < generations; ++g) {
+    grid = step grid
+}
+var population mut = 0
+for (var y mut = 0; y < height; ++y) {
+    for (var x mut = 0; x < width; ++x) {
+        population = population + grid[y][x]
+    }
+}
+print population

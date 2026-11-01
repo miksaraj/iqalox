@@ -1,0 +1,15 @@
+# Method calls and property access on an instance.
+class Counter {
+    var n pub mut
+    init() {
+        self.n = 0
+    }
+    pub bump(by) {
+        self.n = self.n + by
+    }
+}
+var c = Counter()
+for (var i mut = 0; i < 1000000; ++i) {
+    c.bump 2
+}
+print c.n
