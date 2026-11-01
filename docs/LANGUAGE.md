@@ -1,16 +1,15 @@
-# The Iqalox Language (0.3, in progress)
+# The Iqalox Language (0.3)
 
 > **Older versions** (`0.1-poc`, `0.1`, `0.2`) are preserved by git tags
 > rather than as separate files — see
 > [`docs/EARLIER-VERSIONS.md`](EARLIER-VERSIONS.md) for which tag holds
 > each one's reference (this document as it stood at the `0.2` release is
 > `git show 0.2.0:docs/LANGUAGE.md`). This file describes the current,
-> actively-maintained version, and marks what is **new for `0.3`** on top
-> of `0.2`'s language as it goes.
+> current version, and marks what is **new for `0.3`** on top of `0.2`'s
+> language. (At the `0.3` release it is `git show 0.3.0:docs/LANGUAGE.md`.)
 
-This is the complete reference for Iqalox as implemented so far — `0.2`'s
-language plus the `0.3` features that have landed (each marked "new for
-`0.3`") — a
+This is the complete reference for Iqalox `0.3` — `0.2`'s language plus
+the `0.3` additions (each marked "new for `0.3`") — implemented as a
 compiler frontend (`compiler/`, F#) that compiles `.iqx` source to a
 bytecode file, executed by a stack-based virtual machine (`vm/`, C++23).
 It documents what the language **actually does today**, with runnable
@@ -27,8 +26,14 @@ log, and `docs/PLAN-0.1.md`/`docs/PLAN-0.1-POC.md` for the earlier
 versions' logs.
 
 Every code sample below is valid Iqalox and, unless marked otherwise,
-compiles and runs successfully via `compiler/src/Iqaloxc.fsproj` (or
-`iqaloxc`, once built) piped into `vm/build/iqaloxvm`. Longer, complete
+compiles and runs successfully. In a release bundle, run a program in one
+step with `iqalox program.iqx` (the launcher for `iqaloxc run program.iqx`,
+which compiles to a temporary bytecode file and runs `iqaloxvm` on it; the
+exit status is the VM's). The two-step form — `iqaloxc program.iqx out.iqbc`,
+then `iqaloxvm out.iqbc` — remains available. `iqaloxc` also runs a small
+optimizer (constant folding, propagation of never-assigned top-level
+`var`s with literal initializers, dead-code removal) that never changes a
+program's behavior; `--no-optimize` turns it off. Longer, complete
 programs live under `langspec/examples/*.iqx` — this version's
 active-target fixture set (see `langspec/README.md`).
 **Since `0.3` the standard library must be imported** ([§13](#13-the-standard-library)):
@@ -67,12 +72,15 @@ isn't a goal.
 
 Iqalox is Lox — the small teaching language from Bob Nystrom's *Crafting
 Interpreters* — mutated and extended by the repository owner into a
-personal language project. `0.2` builds directly on `0.1`'s compiler
-frontend plus bytecode virtual machine (see `ROADMAP.md`'s architecture
-note), adding real vector manipulation and a first, deliberately-scoped
-pass at multiple-inheritance-style class composition.
+personal language project. `0.3` builds directly on `0.2` (and `0.1`'s
+compiler frontend plus bytecode virtual machine; see `ROADMAP.md`'s
+architecture note): `0.2` added real vector manipulation and a first,
+deliberately-scoped pass at multiple-inheritance-style class composition;
+`0.3` adds multi-file programs with `import`, an import-gated standard
+library, slices and negative indices, richer list comprehensions,
+unused-variable warnings, and a first set of compiler optimizations.
 
-Classifying `0.2` along the axes commonly used to describe programming
+Classifying `0.3` along the axes commonly used to describe programming
 languages — all statements below describe this implementation as it
 exists today, not a permanent commitment for later Iqalox versions:
 
@@ -214,9 +222,13 @@ DIGIT       → '0'...'9'
 ```
 
 - **Numbers** are always floating-point — there is no separate integer
-  type (`5` and `5.0` are the same value). Printing drops a trailing
-  `.0`, so `print 5` prints `5`, not `5.0` (see
-  [§13](#13-the-standard-library)).
+  type (`5` and `5.0` are the same value). Printing a number on its own
+  drops a trailing `.0`, so `print 5` prints `5`, not `5.0` (see
+  [§13](#13-the-standard-library)). **Inside a vector, however, each
+  element is shown in its debug form**: numbers keep their `.0`
+  (`print [1, 2]` prints `[1.0, 2.0]`) and strings are single-quoted
+  (`print ["a"]` prints `['a']`); `nil` and booleans print as usual. The
+  examples below show this real output in their comments.
 - **Strings** may use single or double quotes interchangeably. Escape
   sequences are processed inside string literals — `\n` `\t` `\r` `\\`
   `\'` `\"` `\0` are recognized; any other character after a backslash is
@@ -228,13 +240,13 @@ DIGIT       → '0'...'9'
   comment-only line) becomes a harmless empty statement, not an error.
   The scanner turns *every* newline into an implicit `;` unconditionally,
   with no awareness of bracket/paren depth — see
-  [§15](#15-known-limitations) item 9 for the resulting limitation on
+  [§15](#15-known-limitations) item 8 for the resulting limitation on
   multi-line vector literals and grouping expressions.
 - **Keywords** (cannot be used as identifiers): `and`, `class`, `false`,
   `fun`, `for`, `nil`, `or`, `return`, `super`, `self`, `true`, `var`,
-  `extends`, `break`, `continue`, `mut`, `pub`, `with`, `trait`, `use`.
-  (`module` is still reserved for future module support but has no
-  grammar or meaning yet.) `print` and `concat`, and the whole
+  `extends`, `break`, `continue`, `mut`, `pub`, `with`, `trait`, `use`,
+  `import`, `as`. (`module` is also reserved, but has no grammar or
+  meaning: a file's module name comes from its path, [§17](#17-modules-and-imports-new-for-03).) `print` and `concat`, and the whole
   array/matrix standard library (`push`, `pop`, `length`, `reverse`,
   `map`, `filter`, `reduce`, `sort`, `transpose`, `multiply`, `add`,
   `subtract`, `elementwise`), are **not** keywords — see
@@ -651,11 +663,11 @@ from-the-end convention as single-index access:
 
 ```
 var v = [10, 20, 30, 40, 50]
-print v[1:3]    # [20, 30, 40] -- inclusive of index 3
-print v[:2]     # [10, 20, 30]
-print v[3:]     # [40, 50]
-print v[:]      # [10, 20, 30, 40, 50] -- a full copy
-print v[-2:-1]  # [40, 50]
+print v[1:3]    # [20.0, 30.0, 40.0] -- inclusive of index 3
+print v[:2]     # [10.0, 20.0, 30.0]
+print v[3:]     # [40.0, 50.0]
+print v[:]      # [10.0, 20.0, 30.0, 40.0, 50.0] -- a full copy
+print v[-2:-1]  # [40.0, 50.0]
 ```
 
 Unlike single-index access, a slice is deliberately more lenient: an
@@ -664,7 +676,7 @@ raising a runtime error, and a `start` that resolves after `stop`
 produces an **empty vector** rather than an error:
 
 ```
-print v[0:100]  # [10, 20, 30, 40, 50] -- clamped, not an error
+print v[0:100]  # [10.0, 20.0, 30.0, 40.0, 50.0] -- clamped, not an error
 print v[3:1]    # [] -- start after stop, not an error
 ```
 
@@ -677,10 +689,10 @@ version.
 
 ```
 var tail = [2, 3, 4]
-print [1 | tail]              # [1, 2, 3, 4]
+print [1 | tail]              # [1.0, 2.0, 3.0, 4.0]
 
 var xs = [1, 2, 3, 4]
-print [x * 2 | x <- xs]       # [2, 4, 6, 8]
+print [x * 2 | x <- xs]       # [2.0, 4.0, 6.0, 8.0]
 ```
 
 Both forms share the same `[expr |` opening syntax and are told apart by
@@ -697,8 +709,8 @@ loops, the first-written generator outermost), and optionally follow the
 generator list with a **second** `|` and a guard expression:
 
 ```
-print [[x, y] | x <- [1, 2], y <- ["a", "b"]]   # [[1, 'a'], [1, 'b'], [2, 'a'], [2, 'b']]
-print [n | n <- [1, 2, 3, 4, 5, 6] | n % 2 == 0] # [2, 4, 6]
+print [[x, y] | x <- [1, 2], y <- ["a", "b"]]   # [[1.0, 'a'], [1.0, 'b'], [2.0, 'a'], [2.0, 'b']]
+print [n | n <- [1, 2, 3, 4, 5, 6] | n % 2 == 0] # [2.0, 4.0, 6.0]
 ```
 
 A later generator's source expression may reference an earlier
@@ -708,7 +720,7 @@ the outer loop(s), not just once up front:
 ```
 fun upTo(n) { var r = []; for (var i mut = 0; i < n; ++i) { push r, i; } return r; }
 print [[x, y] | x <- [1, 2, 3], y <- upTo(x)]
-# [[1, 0], [2, 0], [2, 1], [3, 0], [3, 1], [3, 2]]
+# [[1.0, 0.0], [2.0, 0.0], [2.0, 1.0], [3.0, 0.0], [3.0, 1.0], [3.0, 2.0]]
 ```
 
 The guard is just an ordinary boolean expression (`==`, `!=`, `and`,
@@ -729,8 +741,8 @@ ternary) around the append when a guard is present.
 ```
 var a = [1, 2]
 var b = [4, 5]
-print [...a, ...b]              # [1, 2, 4, 5]
-print [0, ...a, 2.5, ...b, 5]   # [0, 1, 2, 2.5, 4, 5, 5]
+print [...a, ...b]              # [1.0, 2.0, 4.0, 5.0]
+print [0, ...a, 2.5, ...b, 5]   # [0.0, 1.0, 2.0, 2.5, 4.0, 5.0, 5.0]
 ```
 
 `...expr` inside a plain, comma-separated vector literal splices every
@@ -828,7 +840,7 @@ just `method(...) { ... }` (private, the default):
 class Vault {
     var contents mut
 
-    init() { self.contents = 0 }
+    init() { self.contents = 0; }
 
     checkPin(pin) { return pin == 1234; }   # private -- self-only
 
@@ -1065,8 +1077,9 @@ The modules:
 ### Core
 
 - **`print value`** — stringifies `value` (see [§3](#3-values-and-types)'s
-  stringification rules: `nil` → `nil`, floats drop a trailing `.0`,
-  booleans lowercase) and writes it followed by a newline. Returns `nil`.
+  stringification rules: `nil` → `nil`, a number on its own drops a
+  trailing `.0`, booleans lowercase; elements inside a vector print in debug
+  form, so `[1, 2]` shows as `[1.0, 2.0]`) and writes it followed by a newline. Returns `nil`.
   Always available, no import needed.
 
 ### Array manipulation (`std.vector`)
@@ -1114,10 +1127,10 @@ argument(s):
 import std.vector.{map, filter, reduce, sort}
 
 var v = [3, 1, 4, 1, 5]
-print (map (x) -> x * 2, v)              # [6, 2, 8, 2, 10]
-print (filter (x) -> x % 2 == 0, v)      # [4]
+print (map (x) -> x * 2, v)              # [6.0, 2.0, 8.0, 2.0, 10.0]
+print (filter (x) -> x % 2 == 0, v)      # [4.0]
 print (reduce (a, b) -> a + b, v, 0)     # 14
-print (sort (a, b) -> a < b, v)          # [1, 1, 3, 4, 5]
+print (sort (a, b) -> a < b, v)          # [1.0, 1.0, 3.0, 4.0, 5.0]
 ```
 
 ### Matrix manipulation (`std.matrix`)
@@ -1151,11 +1164,11 @@ import std.matrix.{transpose, multiply, add, subtract, elementwise}
 var a = [[1, 2], [3, 4]]
 var b = [[5, 6], [7, 8]]
 
-print transpose a                        # [[1, 3], [2, 4]]
-print multiply a, b                      # [[19, 22], [43, 50]]
-print add a, b                           # [[6, 8], [10, 12]]
-print subtract a, b                      # [[-4, -4], [-4, -4]]
-print elementwise (x, y) -> x * y, a, b  # [[5, 12], [21, 32]]
+print transpose a                        # [[1.0, 3.0], [2.0, 4.0]]
+print multiply a, b                      # [[19.0, 22.0], [43.0, 50.0]]
+print add a, b                           # [[6.0, 8.0], [10.0, 12.0]]
+print subtract a, b                      # [[-4.0, -4.0], [-4.0, -4.0]]
+print elementwise (x, y) -> x * y, a, b  # [[5.0, 12.0], [21.0, 32.0]]
 ```
 
 Everything else commonly found in a language's standard library — string
@@ -1203,7 +1216,7 @@ recover from either kind:
 **Remaining, smaller gap versus `0.1-poc`**: `0.1-poc` additionally shows
 *which token* triggered the error (`Error at 'x': ...`) plus a caret-
 underlined source excerpt, for both compile-time and runtime errors.
-`0.2` has real line numbers for both, but not yet the token text or
+`0.3` has real line numbers for both, but not yet the token text or
 source excerpt — the VM in particular has no access to the original
 source text at all (it only ever receives a compiled `.iqbc` file), so
 reproducing `0.1-poc`'s excerpt there would need embedding source text in
@@ -1321,7 +1334,7 @@ for the full history of how each was arrived at.
 7. **No token text or source excerpt on errors, unlike `0.1-poc`.**
    `0.1-poc` reports both compile-time and runtime errors as `[line N]
    Error at 'x': message` plus a caret-underlined single-line source
-   excerpt. `0.2` reports a real `[line N]` for every error kind
+   excerpt. `0.3` reports a real `[line N]` for every error kind
    (including runtime errors, via a per-instruction-byte line table in
    the bytecode format itself), but not yet the offending token's text or
    a source excerpt. The excerpt/token-text part remains open, and for
@@ -1419,7 +1432,7 @@ level of a file is a compile error.
 ```
 # math/vector.iqx
 var offset = 100                    # private to this file
-fun shifted(n) { return n + offset }  # private
+fun shifted(n) { return n + offset; }  # private
 
 pub fun double(n) {                 # importable
     return shifted(n) - offset + n
