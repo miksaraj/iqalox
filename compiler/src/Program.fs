@@ -4,16 +4,13 @@
 /// `poc/src/iqalox.py`'s existing sysexits.h convention (64 usage, 65
 /// source/compile error).
 ///
-/// `docs/PLAN-0.2.md` Phase 5: `Prelude.source`'s `map`/`filter`/`reduce`/
-/// `sort` are scanned and parsed here too, once per invocation, and their
-/// statements are prepended to the user's own before resolving/compiling
-/// -- one combined program, one `Chunk`, so `Resolver.fs`'s ordinary
-/// global pre-registration sees both without any special-casing. Scanned
-/// and parsed *separately* from the user's source purely so a failure in
-/// each can be attributed to the right one -- an error inside
-/// `Prelude.source` itself would mean a real bug in this compiler, not
-/// anything the user wrote, so it's reported distinctly rather than
-/// folded into the user's own error list.
+/// `docs/PLAN-0.3.md` Phase 6: there is no textually-merged prelude any
+/// more. The standard library (`Stdlib.fs`) is a set of built-in `std.*`
+/// modules, scanned and parsed here on demand (only when something imports
+/// them) and handed to the module loader by name. A failure while scanning,
+/// parsing or resolving one would mean a bug in this compiler, not in
+/// anything the user wrote, so it is reported distinctly as an internal
+/// error.
 module Iqalox.Program
 
 open System
@@ -46,75 +43,78 @@ let private parseModule (entryFull: string) (moduleName: string) (path: string) 
             else
                 Ok(stmts, importedModuleNames stmts)
 
+/// Scans and parses a built-in module's embedded source.
+let private parseBuiltin (name: string) (source: string) : Result<Ast.Stmt list, string list> =
+    let tokens, scanErrors = scanTokens source
+
+    if not scanErrors.IsEmpty then
+        Error [ for e in scanErrors -> $"internal error: {name} failed to scan [line {e.Line}]: {e.Message}" ]
+    else
+        let stmts, parseErrors = parse tokens
+
+        if not parseErrors.IsEmpty then
+            Error [ for e in parseErrors -> $"internal error: {name} failed to parse [line {e.Token.Line}]: {e.Message}" ]
+        else
+            Ok stmts
+
 [<EntryPoint>]
 let main argv =
     match argv with
     | [| inputPath; outputPath |] ->
-        let preludeTokens, preludeScanErrors = scanTokens Prelude.source
+        let entryFull = IO.Path.GetFullPath inputPath
+        let rootDir = IO.Path.GetDirectoryName entryFull
 
-        if not preludeScanErrors.IsEmpty then
-            for e in preludeScanErrors do
-                eprintfn "internal error: prelude failed to scan [line %d]: %s" e.Line e.Message
-            70
-        else
-            let preludeStmts, preludeParseErrors = parse preludeTokens
+        let parseFile (path: string) =
+            parseModule entryFull (moduleNameOfPath rootDir (IO.Path.GetFullPath path)) path
 
-            if not preludeParseErrors.IsEmpty then
-                for e in preludeParseErrors do
-                    eprintfn "internal error: prelude failed to parse [line %d]: %s" e.Token.Line e.Message
+        let builtin (name: string) =
+            Stdlib.tryFind name |> Option.map (fun m -> parseBuiltin m.Name m.Source, m.Natives)
+
+        match loadModulesWith builtin inputPath parseFile with
+        | Error lines ->
+            for line in lines do
+                eprintfn "%s" line
+            65
+        | Ok modules ->
+            let linked = linkModules modules
+
+            let label (d: UnitDiagnostics) (line: int) =
+                if d.IsEntry then $"[line {line}]" else $"[{d.Module}, line {line}]"
+
+            // A built-in module's own diagnostics are never the user's
+            // business: warnings are dropped, and an error means a bug in
+            // this compiler.
+            let builtinErrors = linked.Diagnostics |> List.filter (fun d -> d.IsBuiltin && not d.Errors.IsEmpty)
+
+            if not builtinErrors.IsEmpty then
+                for d in builtinErrors do
+                    for e in d.Errors do
+                        eprintfn "internal error: %s failed to resolve [line %d]: %s" d.Module e.Token.Line e.Message
                 70
             else
-                // The prelude is resolved as its own unit, once, and its
-                // declared names seed every user module as ordinary
-                // immutable globals (`docs/PLAN-0.3.md` Phase 4).
-                let prelude = resolveUnit [] [] preludeStmts
+                // Warnings first and unconditionally -- they never affect
+                // the exit status (`docs/PLAN-0.3.md` decision 4).
+                for d in linked.Diagnostics |> List.filter (fun d -> not d.IsBuiltin) do
+                    for w in d.Warnings do
+                        eprintfn "%s Warning: %s" (label d w.Token.Line) w.Message
 
-                if not prelude.Errors.IsEmpty then
-                    for e in prelude.Errors do
-                        eprintfn "internal error: prelude failed to resolve [line %d]: %s" e.Token.Line e.Message
-                    70
+                let hasErrors = linked.Diagnostics |> List.exists (fun d -> not d.Errors.IsEmpty)
+
+                if hasErrors then
+                    for d in linked.Diagnostics do
+                        for e in d.Errors do
+                            eprintfn "%s Error: %s" (label d e.Token.Line) e.Message
+                    65
                 else
-                    let entryFull = IO.Path.GetFullPath inputPath
-                    let rootDir = IO.Path.GetDirectoryName entryFull
+                    let chunk, fileNames, codegenErrors = compileSegments linked.Segments
 
-                    let parseFile (path: string) =
-                        parseModule entryFull (moduleNameOfPath rootDir (IO.Path.GetFullPath path)) path
-
-                    match loadModules inputPath parseFile with
-                    | Error lines ->
-                        for line in lines do
-                            eprintfn "%s" line
+                    if not codegenErrors.IsEmpty then
+                        for e in codegenErrors do
+                            eprintfn "[line %d] Error: %s" e.Line e.Message
                         65
-                    | Ok modules ->
-                        let linked = linkModules prelude modules
-
-                        let label (d: UnitDiagnostics) (line: int) =
-                            if d.IsEntry then $"[line {line}]" else $"[{d.Module}, line {line}]"
-
-                        // Warnings first and unconditionally -- they never
-                        // affect the exit status (`docs/PLAN-0.3.md`
-                        // decision 4).
-                        for d in linked.Diagnostics do
-                            for w in d.Warnings do
-                                eprintfn "%s Warning: %s" (label d w.Token.Line) w.Message
-
-                        let hasErrors = linked.Diagnostics |> List.exists (fun d -> not d.Errors.IsEmpty)
-
-                        if hasErrors then
-                            for d in linked.Diagnostics do
-                                for e in d.Errors do
-                                    eprintfn "%s Error: %s" (label d e.Token.Line) e.Message
-                            65
-                        else
-                            let chunk, fileNames, codegenErrors = compileSegments linked.Segments
-
-                            if not codegenErrors.IsEmpty then
-                                for e in codegenErrors do
-                                    eprintfn "[line %d] Error: %s" e.Line e.Message
-                                65
-                            else
-                                writeWithFiles fileNames chunk outputPath
-                                0
+                    else
+                        writeWithFiles fileNames chunk outputPath
+                        0
     | _ ->
         eprintfn "Usage: iqaloxc <input .iqx file> <output bytecode file>"
         64

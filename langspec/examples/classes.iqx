@@ -1,3 +1,5 @@
+import std.vector.concat
+
 # Simple class with constructor and method, using 0.2's declared
 # properties and pub/mut visibility (docs/PLAN-0.2.md decisions 8-11).
 # Every property needs an explicit `var` declaration now; a method needs

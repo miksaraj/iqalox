@@ -34,17 +34,12 @@ Implementation-agnostic material stays at the repository root:
   what's actually implemented in `compiler/`+`vm/` during a version's
   phased rollout; check that version's `docs/PLAN-0.X.md` §4 feature
   checklist for what has actually landed. `langspec/README.md` explains
-  the directory's own layout in full. Two kinds of frozen snapshots live
-  alongside the current spec, and they are **not the same thing**:
-  `langspec/versions/<version>/` holds a complete, frozen copy of a
-  version's spec once it has fully shipped (`versions/0.1/`, moved there
-  when `0.2` planning began, `docs/PLAN-0.2.md` decision 13; `versions/0.2/`,
-  moved there when `0.3` planning began, `docs/PLAN-0.3.md` Phase 0);
-  `langspec/archived/` holds unrelated frozen snapshots of pre-renumbering
-  *planning* iterations (0.1, 0.2, 0.3, per `ROADMAP.md`'s own renumbering
-  note) — historical record, not to be edited, and not a version-by-version
-  spec history the way `versions/` is. `langspec/examples/*.iqx` (wherever
-  they appear — top level or inside a `versions/<n>/` snapshot) are
+  the directory's own layout in full. **Earlier versions are preserved by
+  git tags, not by frozen copies in the tree** (decided during `0.3`
+  Phase 6 — see `docs/EARLIER-VERSIONS.md` for which tag and path holds
+  what): the only frozen thing still in the tree is
+  `langspec/versions/0.1/examples/`, kept because CI's `poc/` smoke test and
+  the `poc/` release bundle read it. Tag every release. `langspec/examples/*.iqx` are
   cross-implementation conformance fixtures — same input, same expected
   output, regardless of which implementation runs them, *when* more than
   one implementation can run them at all (see the "Example scripts" bullet
@@ -52,13 +47,11 @@ Implementation-agnostic material stays at the repository root:
 - `ROADMAP.md` — the version roadmap (0.1-poc onward).
 - `docs/` — implementation planning docs (`docs/PLAN-0.1-POC.md` for
   `0.1-poc`, `docs/PLAN-0.1.md` for `0.1`, `docs/PLAN-0.2.md` for `0.2`,
-  `docs/PLAN-0.3.md` for `0.3`, currently being planned);
-  `docs/LANGUAGE.md` for the current (`0.2`) language reference —
-  still accurate until `0.3`'s own features start landing,
-  `docs/LANGUAGE-0.1.md` for the frozen `0.1`-era one, `docs/LANGUAGE-POC.md`
-  for the frozen `0.1-poc`-era one — each version gets its own
-  `LANGUAGE-<version>.md` this way as Iqalox evolves, rather than one file
-  being silently rewritten out from under its own history.
+  `docs/PLAN-0.3.md` for `0.3`, currently being implemented), plus
+  `docs/LANGUAGE.md`, the language reference for the current version (it
+  marks what is new in `0.3`). Older references (`0.1-poc`, `0.1`, `0.2`)
+  are not kept as separate files; `docs/EARLIER-VERSIONS.md` says which tag
+  to read them from.
 
 ## Language design authority
 
@@ -119,9 +112,8 @@ regeneration will silently discard the change. (Bug fixes to
 `langspec/SYNTAX_GRAMMAR.md` tracked `poc/src/parser.py` while `0.1-poc` was
 the active target; as of `0.2` planning, the top-level `langspec/` describes
 the **active-target spec**, which is written ahead of `compiler/`+`vm/`
-actually implementing it and moved to `langspec/versions/<version>/` once a
-version fully ships (see the `langspec/` bullet above and
-`langspec/README.md`). Don't treat a target-spec grammar doc as
+actually implementing it; once a version ships it is preserved by its git
+tag (see the `langspec/` bullet above and `langspec/README.md`). Don't treat a target-spec grammar doc as
 authorization to implement something differently than what's actually
 decided elsewhere, and don't assume everything it describes already works —
 check the relevant `docs/PLAN-0.X.md` §4 feature checklist first.
@@ -396,12 +388,28 @@ ship the simplified approximation now with C3 deferred — see
 `docs/PLAN-0.2.md`'s Phase 8 entry for the full writeup.
 
 Phase 9 (this phase) is docs-only: `docs/LANGUAGE.md` forked into a frozen
-`docs/LANGUAGE-0.1.md` plus a new, current `docs/LANGUAGE.md` describing
+`docs/LANGUAGE-0.1.md` (since removed — releases are preserved by git tags now,
+see `docs/EARLIER-VERSIONS.md`) plus a new, current `docs/LANGUAGE.md` describing
 `0.2` in full (the same fork-not-addendum pattern `0.1`'s own Phase 10
 used, and this section mirrors for `CLAUDE.md` itself); every top-level
 `langspec/examples/*.iqx` fixture verified end-to-end through the real
 `compiler/`+`vm/` toolchain; `ROADMAP.md` marks `0.2` delivered and moves
 the active-target goalposts to `0.3`.
+
+## Architecture (`compiler/` + `vm/`, 0.3, in progress)
+
+See `docs/PLAN-0.3.md` (the decision log and per-phase writeups). Phases 1-6
+have landed: negative indices and slices; multi-generator/guarded list
+comprehensions; unused-variable/-import warnings; multi-file compilation
+(`compiler/src/Modules.fs`: path-derived module names, an `import` statement,
+`pub` as the export marker, one `.iqbc` out, no `vm/` involvement beyond a
+file table in bytecode format v3 so runtime errors name their source file);
+and an import-gated standard library. **Phase 6 supersedes the `0.2`
+description above of a textually-prepended prelude**: `compiler/src/Prelude.fs`
+is now `Stdlib.fs`, a set of built-in `std.*` modules (`std.vector`,
+`std.matrix`) a program must `import`; `print` is the only ambient name; every
+module (the entry file too) has its globals qualified (`main::x`) so a user's
+own `sort`/`push` can never clobber a native in the VM's flat global table.
 
 ## Engineering conventions
 
@@ -436,11 +444,10 @@ the active-target goalposts to `0.3`.
   nullable reference types (F# 9) have no real application here, since this
   codebase doesn't interoperate with null-returning APIs.
 - **Example scripts**: live in `langspec/examples/*.iqx` (current
-  active-target version) — `langspec/archived/*/examples/*.iqlx` used the
-  old extension and are frozen, unrelated pre-renumbering planning
-  snapshots (see the `langspec/` bullet above), not the same thing as
-  `langspec/versions/<version>/examples/`'s per-version snapshots. These
-  are cross-implementation-*capable* fixtures in principle (same input,
+  active-target version); earlier versions' examples are in their git
+  tags (`docs/EARLIER-VERSIONS.md`), except `langspec/versions/0.1/examples/`
+  which stays in the tree for CI. These are cross-implementation-*capable*
+  fixtures in principle (same input,
   same expected output, wherever more than one implementation can parse
   the syntax at all) — but there's no automated CI enforcing that anymore;
   see the `compiler/`/`vm/` testing bullet above for why

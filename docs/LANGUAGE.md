@@ -1,14 +1,16 @@
-# The Iqalox Language (0.2)
+# The Iqalox Language (0.3, in progress)
 
-> **For older versions, see:** [`docs/LANGUAGE-0.1.md`](LANGUAGE-0.1.md) for
-> `0.1` (the compiler frontend + bytecode VM this version builds directly
-> on top of) and [`docs/LANGUAGE-POC.md`](LANGUAGE-POC.md) for `0.1-poc`
-> (the original Python tree-walk interpreter, still kept in the repo as a
-> working reference implementation — `poc/`, per `CLAUDE.md`). Each
-> version gets its own `LANGUAGE-<version>.md` this way as Iqalox evolves;
-> this file always describes the current, actively-maintained version.
+> **Older versions** (`0.1-poc`, `0.1`, `0.2`) are preserved by git tags
+> rather than as separate files — see
+> [`docs/EARLIER-VERSIONS.md`](EARLIER-VERSIONS.md) for which tag holds
+> each one's reference (this document as it stood at the `0.2` release is
+> `git show 0.2.0:docs/LANGUAGE.md`). This file describes the current,
+> actively-maintained version, and marks what is **new for `0.3`** on top
+> of `0.2`'s language as it goes.
 
-This is the complete reference for Iqalox as implemented by `0.2` — a
+This is the complete reference for Iqalox as implemented so far — `0.2`'s
+language plus the `0.3` features that have landed (each marked "new for
+`0.3`") — a
 compiler frontend (`compiler/`, F#) that compiles `.iqx` source to a
 bytecode file, executed by a stack-based virtual machine (`vm/`, C++23).
 It documents what the language **actually does today**, with runnable
@@ -28,8 +30,10 @@ Every code sample below is valid Iqalox and, unless marked otherwise,
 compiles and runs successfully via `compiler/src/Iqaloxc.fsproj` (or
 `iqaloxc`, once built) piped into `vm/build/iqaloxvm`. Longer, complete
 programs live under `langspec/examples/*.iqx` — this version's
-active-target fixture set (see `langspec/README.md`); `0.1`'s own frozen
-snapshot lives under `langspec/versions/0.1/examples/*.iqx`.
+active-target fixture set (see `langspec/README.md`).
+**Since `0.3` the standard library must be imported** ([§13](#13-the-standard-library)):
+samples below that call a library function (`push`, `concat`, `map`, ...) leave
+the `import std....` line out for brevity unless the sample is about imports.
 `scripts/conformance-test.sh` (`docs/PLAN-0.1.md` Phase 9), which used to
 diff fixture output against `poc/` byte-for-byte, was retired during
 `0.2` Phase 7 (`docs/PLAN-0.2.md`): decisions 8-11's breaking changes to
@@ -103,11 +107,11 @@ exists today, not a permanent commitment for later Iqalox versions:
   (`vm/src/vm.cpp`) loads and executes via a fetch-decode-execute loop
   over an explicit value stack and call-frame stack. There is no
   tree-walking, no JIT, and no further optimization pass on the bytecode
-  itself. **New for `0.2`**: every program is compiled together with a
-  small prelude of standard-library functions written in Iqalox itself
-  (`compiler/src/Prelude.fs`, see [§13](#13-the-standard-library)) —
-  textually merged with the user's own source before resolution, not a
-  separate module or import mechanism.
+  itself. **New for `0.2`/`0.3`**: the standard library is a set of built-in `std.*`
+modules (`compiler/src/Stdlib.fs`, see [§13](#13-the-standard-library)),
+imported like any other module and compiled into a program only when
+something imports them; the one name available without an import is
+`print`.
 - **Evaluation strategy**: **eager (strict)** evaluation everywhere except
   the short-circuiting operators — `and`/`or`, `??`, and the
   ternary/elvis forms — which compile to conditional jumps rather than
@@ -1023,31 +1027,51 @@ class C {
 
 ## 13. The standard library
 
-`0.2` has a substantially larger standard library than `0.1`'s two
-functions, all registered as ordinary (shadowable, non-keyword) global
-bindings — there is no reserved-word status protecting any of these
-names, and shadowing one (`var length = ...`) at the top level is a
-compile-time error (redeclaring an existing global) exactly like
-redeclaring any other global; shadowing inside a nested scope is fine.
+**New for `0.3`: the standard library is import-gated.** `print` is the
+only name available in every program without an import. Everything else
+lives in a built-in module under `std` and must be imported by name,
+exactly like names from your own modules ([§17](#17-modules-and-imports-new-for-03)):
+
+```
+import std.vector.{push, map}
+import std.matrix.transpose
+```
+
+- **You can declare your own `sort`, `max`, `add`, `length`, ...** — none
+  of them is reserved. (`print` is: declaring your own `print` is an
+  "already declared" error.)
+- **No silent shadowing, here too.** If you import `std.vector.sort` *and*
+  declare your own `sort` in the same file, that's the usual
+  `Variable 'sort' already declared.` error; rename the import with `as`
+  (`import std.vector.sort as stdSort`).
+- **Forgetting an import is a compile-time error** that says what to
+  add: `'push' is part of the standard library and isn't in scope; add
+  'import std.vector.push'.`
+- An unused standard-library import gets the usual unused-import warning
+  ([§14](#14-errors)).
+- A built-in module is only compiled into your program if something
+  imports it, so a program that uses none of it carries none of it.
+- `std` is reserved: a file of yours at `std/vector.iqx` that would
+  collide with a built-in module is a compile-time error, not a silent
+  override.
+
+The modules:
+
+- **`std.vector`** — `push`, `pop`, `length`, `reverse`, `concat`, `map`,
+  `filter`, `reduce`, `sort`
+- **`std.matrix`** — `transpose`, `multiply`, `add`, `subtract`,
+  `elementwise`
 
 ### Core
 
 - **`print value`** — stringifies `value` (see [§3](#3-values-and-types)'s
   stringification rules: `nil` → `nil`, floats drop a trailing `.0`,
   booleans lowercase) and writes it followed by a newline. Returns `nil`.
-- **`concat vector`** — stringifies every element of `vector` and joins
-  them with no separator, returning the resulting string. This is
-  currently the *only* way to build a string from non-string values or to
-  join strings together, since `+` doesn't work on strings
-  ([§3](#3-values-and-types)). A non-vector argument is a runtime error.
+  Always available, no import needed.
 
-```
-concat ["a", 1, "b"]   # "a1b"
-```
+### Array manipulation (`std.vector`)
 
-### Array manipulation
-
-`push`, `pop`, `length`, and `reverse` are true natives
+`push`, `pop`, `length`, `reverse` and `concat` are true natives
 (`vm/src/natives.cpp`) — they operate directly on an `ObjVector`'s
 storage and never call back into user code:
 
@@ -1058,11 +1082,20 @@ storage and never call back into user code:
 - **`length vector`** — returns the element count as a number.
 - **`reverse vector`** — returns a **new** vector with elements in
   reverse order; does not mutate the original.
+- **`concat vector`** — stringifies every element of `vector` and joins
+  them with no separator, returning the resulting string. This is
+  currently the *only* way to build a string from non-string values or to
+  join strings together, since `+` doesn't work on strings
+  ([§3](#3-values-and-types)). A non-vector argument is a runtime error.
+
+```
+concat ["a", 1, "b"]   # "a1b"
+```
 
 `map`, `filter`, `reduce`, and `sort` are not natives — they're ordinary
-Iqalox `fun` declarations (`compiler/src/Prelude.fs`), textually
-prepended to every program's source before it's compiled, using the same
-paren-free call syntax and lambda syntax any user program has. They take
+Iqalox `fun` declarations (`compiler/src/Stdlib.fs`), compiled like any
+other module when imported, using the same paren-free call syntax and
+lambda syntax any user program has. They take
 a lambda as their first argument and never mutate their vector
 argument(s):
 
@@ -1078,6 +1111,8 @@ argument(s):
   ascending, `(a, b) -> a > b` for descending).
 
 ```
+import std.vector.{map, filter, reduce, sort}
+
 var v = [3, 1, 4, 1, 5]
 print (map (x) -> x * 2, v)              # [6, 2, 8, 2, 10]
 print (filter (x) -> x % 2 == 0, v)      # [4]
@@ -1085,7 +1120,7 @@ print (reduce (a, b) -> a + b, v, 0)     # 14
 print (sort (a, b) -> a < b, v)          # [1, 1, 3, 4, 5]
 ```
 
-### Matrix manipulation
+### Matrix manipulation (`std.matrix`)
 
 A matrix is a vector of vectors, indexed one level at a time (see
 [§9](#9-vectors-indexing-cons-comprehensions-and-spread)). `transpose`,
@@ -1101,16 +1136,18 @@ mismatch (e.g. multiplying a 2x3 by a 4x2 matrix):
   `a` and `b` must be the same shape.
 
 `elementwise fn, a, b` is, like `map`/`filter`/`reduce`/`sort`, ordinary
-Iqalox source (`compiler/src/Prelude.fs`) rather than a native — it
+Iqalox source (`compiler/src/Stdlib.fs`) rather than a native — it
 applies `fn(a[i][j], b[i][j])` across every position and returns the
 resulting matrix, but **deliberately does not validate** that `a` and `b`
 are the same shape the way the four natives above do: since there's no
-`try`/`throw` construct for Prelude-level Iqalox code to raise a
+`try`/`throw` construct for library-level Iqalox code to raise a
 dedicated error with, a shape mismatch here just falls through to the
 ordinary "vector index out of range" error a step later — a real,
 non-crashing runtime error either way, just not a custom-worded one.
 
 ```
+import std.matrix.{transpose, multiply, add, subtract, elementwise}
+
 var a = [[1, 2], [3, 4]]
 var b = [[5, 6], [7, 8]]
 
@@ -1151,7 +1188,7 @@ recover from either kind:
   exits with status `70`, after whatever output was already produced —
   `file` is the faulting instruction's source file, relative to the
   entry file's directory (`math/vector.iqx`; `main.iqx` for the entry
-  file itself; `<prelude>` for a fault inside the standard-library
+  file itself; `<std.vector>`/`<std.matrix>` for a fault inside the standard-library
   functions written in Iqalox, [§13](#13-the-standard-library)). The
   location comes from per-instruction-byte line and file tables the
   bytecode format carries alongside the instructions themselves — every
@@ -1334,14 +1371,14 @@ for the full history of how each was arrived at.
 
 The following limitations from earlier versions are **resolved**:
 vectors being literal-only with no indexing/mutation/length (now fixed as
-of `0.2`, see `docs/LANGUAGE-0.1.md` §13 for the original write-up;
+of `0.2`, see `git show 0.1.0:docs/LANGUAGE.md` §13 for the original write-up;
 [§9](#9-vectors-indexing-cons-comprehensions-and-spread),
 [§13](#13-the-standard-library)), object fields having no immutability or
-declaration concept at all (now fixed as of `0.2`, `docs/LANGUAGE-0.1.md`
-§13; [§11](#11-classes-and-objects) — properties must be declared and
+declaration concept at all (now fixed as of `0.2`, `git show
+0.1.0:docs/LANGUAGE.md` §13; [§11](#11-classes-and-objects) — properties must be declared and
 default to write-once), list comprehensions supporting only a single
 generator with no guard clause (now fixed as of `0.3`, see
-`docs/LANGUAGE-0.2.md` §15 once it exists for the original write-up;
+`git show 0.2.0:docs/LANGUAGE.md` §15 for the original write-up;
 [§9](#9-vectors-indexing-cons-comprehensions-and-spread) covers the
 multi-generator/guarded form), and runtime errors reporting only a
 bare `[line N]` with no file — which mattered once a program could span
@@ -1392,12 +1429,26 @@ pub var origin = [0, 0]             # importable (add `mut` for pub var x mut = 
 
 **`import`** brings specific names in, unqualified. The last dotted
 segment is the name; everything before it is the module path. Several
-can be listed, comma-separated, and `as` binds one under another name:
+names from one module can be grouped in braces so the module path isn't
+repeated, `as` binds one under another name, and entries are
+comma-separated:
 
 ```
-import math.vector.double, math.vector.origin as zero
-import shapes.Shape, shapes.Named
+import math.vector.double              # one name
+import math.vector.origin as zero      # renamed
+import shapes.{Shape, Named}           # several from one module
+import std.matrix.{transpose, multiply as mul, add}, math.vector.double
 ```
+
+A brace group may span lines (newlines inside the braces are ignored),
+which keeps a long list readable. It needs at least one name, and a
+trailing comma is not allowed. The braces are only a shorthand: they mean
+exactly what the same names written out one by one would.
+
+There is deliberately no wildcard (`import std.matrix.*`): once `1.0`
+starts the compatibility promise, adding a function to a library module
+would otherwise break any program that wildcard-imports it *and* declares
+the same name itself. Named imports are immune to that.
 
 - `import` is only allowed at the top level of a file (not inside a
   function, class or block), and may appear anywhere there.

@@ -789,3 +789,63 @@ let ``pub before anything else is a parse error`` () =
 let ``import and as are reserved words now`` () =
     let _, errors = parseWithErrors "var as = 1"
     Assert.NotEmpty errors
+
+// --- brace-grouped imports: import a.b.{x, y as z} ---
+
+let private importItems (source: string) : ImportItem list =
+    match parseSource source with
+    | [ ImportStmt(_, items) ] -> items
+    | other -> failwith $"unexpected: %A{other}"
+
+[<Fact>]
+let ``a brace group imports several names from one module`` () =
+    let items = importItems "import std.matrix.{transpose, add}"
+    Assert.Equal<string list>([ "transpose"; "add" ], items |> List.map (fun i -> i.Name.Lexeme))
+    for item in items do
+        Assert.Equal<string list>([ "std"; "matrix" ], lexemes item.Module)
+
+[<Fact>]
+let ``names inside a brace group can be renamed with as`` () =
+    let items = importItems "import std.matrix.{multiply as mul, add}"
+    Assert.Equal("mul", items.[0].Alias.Value.Lexeme)
+    Assert.True items.[1].Alias.IsNone
+
+[<Fact>]
+let ``a brace group may span several lines`` () =
+    let items = importItems "import std.vector.{\n    push,\n    pop as take,\n    map\n}"
+    Assert.Equal<string list>([ "push"; "pop"; "map" ], items |> List.map (fun i -> i.Name.Lexeme))
+    Assert.Equal("take", items.[1].Alias.Value.Lexeme)
+
+[<Fact>]
+let ``groups, single names and several modules can be mixed in one import`` () =
+    let items = importItems "import std.matrix.{add, transpose}, std.vector.push, util.{a as b}"
+    Assert.Equal(4, items.Length)
+    Assert.Equal<string list>([ "util" ], lexemes items.[3].Module)
+    Assert.Equal<string list>([ "std"; "vector" ], lexemes items.[2].Module)
+
+[<Fact>]
+let ``a module path of just one segment is allowed before a brace group`` () =
+    let items = importItems "import util.{helper}"
+    Assert.Equal<string list>([ "util" ], lexemes items.[0].Module)
+    Assert.Equal("helper", items.[0].Name.Lexeme)
+
+[<Fact>]
+let ``an empty brace group is a parse error`` () =
+    let _, errors = parseWithErrors "import std.matrix.{}"
+    Assert.NotEmpty errors
+    Assert.Contains("at least one name", errors.[0].Message)
+
+[<Fact>]
+let ``an unclosed brace group is a parse error`` () =
+    let _, errors = parseWithErrors "import std.matrix.{add, transpose"
+    Assert.NotEmpty errors
+
+[<Fact>]
+let ``a trailing comma in a brace group is a parse error`` () =
+    let _, errors = parseWithErrors "import std.matrix.{add,}"
+    Assert.NotEmpty errors
+
+[<Fact>]
+let ``a real semicolon inside a brace group is not swallowed`` () =
+    let _, errors = parseWithErrors "import std.matrix.{add; transpose}"
+    Assert.NotEmpty errors

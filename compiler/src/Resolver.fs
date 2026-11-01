@@ -505,6 +505,7 @@ type private Resolver
         globals: Dictionary<string, bool>,
         globalDecls: Dictionary<string, Token * string>,
         aliases: Dictionary<string, string>,
+        importHints: Map<string, string>,
         classes: Dictionary<string, ClassInfo>,
         effectiveMembers: Dictionary<string, MemberSet>
     ) =
@@ -645,14 +646,11 @@ type private Resolver
     /// `usedGlobalNames` never saw a real read of anywhere in the
     /// program -- same read-vs-write rule as a local (assigning to a
     /// global without ever reading it back still warns). `exemptNames`
-    /// lets the caller carve out names that shouldn't be checked at all
-    /// even though they're ordinary top-level declarations -- `Program.fs`
-    /// uses this for the prelude's own `map`/`filter`/`reduce`/`sort`/
-    /// `elementwise`, textually merged in ahead of the user's own source
-    /// (`docs/PLAN-0.2.md` Phase 5): a user program that only calls
-    /// `map` shouldn't be warned that `sort` is "unused" when it never
-    /// asked for `sort` to be declared in the first place. Must run after
-    /// the whole program has resolved, same as `CheckUnusedClassMembers`.
+    /// carves out names that shouldn't be checked even though they're
+    /// ordinary top-level declarations: the unit's own `pub` exports (they
+    /// are its public surface, used or not within this file). Must run
+    /// after the whole program has resolved, same as
+    /// `CheckUnusedClassMembers`.
     member this.CheckUnusedGlobals(exemptNames: Set<string>) =
         for KeyValue(name, (token, kind)) in globalDecls do
             if
@@ -847,7 +845,17 @@ type private Resolver
         | Vector values -> BVector(values |> List.map this.ResolveExpr)
         | Spread(expr, ellipsis) -> BSpread(this.ResolveExpr expr, ellipsis)
         | Variable name ->
-            let binding, _ = resolveReference name.Lexeme true
+            let binding, mutability = resolveReference name.Lexeme true
+            // An unresolved global is normally left for the runtime to
+            // judge -- but the VM registers every built-in native under its
+            // bare name, so a standard-library name that was never imported
+            // would silently *work*. Make it the compile-time error the
+            // import-gated library (`docs/PLAN-0.3.md` Phase 6) promises.
+            match binding, mutability with
+            | GlobalBinding n, None when importHints.ContainsKey n ->
+                let m = importHints.[n]
+                error name $"'{n}' is part of the standard library and isn't in scope; add 'import {m}.{n}'."
+            | _ -> ()
             BVariable(binding, name)
         | BreakExpr keyword -> BBreak keyword
         | ContinueExpr keyword -> BContinue keyword
@@ -1049,23 +1057,17 @@ type private Resolver
                 let selfBinding, _ = resolveReference "self" true
                 BSuper(selfBinding, binding, keyword, method)
 
-/// Native functions the VM provides without any user declaration (Phase
-/// 7: `print`, `concat`; Phase 5 of `docs/PLAN-0.2.md`: `push`, `pop`,
-/// `length`, `reverse`; Phase 6: `transpose`, `multiply`, `add`,
-/// `subtract`) -- pre-registered as immutable globals, exactly like a
-/// user-declared `fun`, so `print = 5` is a compile-time immutability
-/// error and `var print = 1` is a compile-time redeclaration error
-/// instead of silently succeeding just because the resolver has never
-/// heard of the name. Mirrors `poc`'s `Interpreter.__init__`, which
-/// defines both in the same environment chain user code runs in, with
-/// `is_mutable=False`, before any user statement executes. Keep this in
-/// sync with `vm/src/vm.cpp`'s `defineNatives` -- the two toolchains have
-/// no shared source of truth for this list. `map`/`filter`/`reduce`/`sort`/
-/// `elementwise` are deliberately NOT here -- they're ordinary `fun`
-/// declarations (`Prelude.fs`) resolved as part of the same program as
-/// any user `fun`, needing no special-casing at all.
-let private nativeGlobals =
-    [ "print"; "concat"; "push"; "pop"; "length"; "reverse"; "transpose"; "multiply"; "add"; "subtract" ]
+/// The only name that is ambient in every program (`docs/PLAN-0.3.md`
+/// Phase 6): `print` is core, always available with no import, and
+/// pre-registered as an immutable global exactly like a user-declared
+/// `fun`, so `print = 5` is a compile-time immutability error and `var
+/// print = 1` a redeclaration error. Every other native (`push`,
+/// `length`, `transpose`, ...) is exported by a built-in `std.*` module
+/// (`Stdlib.fs`) and must be imported; the VM still registers them all
+/// under their bare names (`vm/src/vm.cpp`'s `defineNatives` -- keep the
+/// two lists in sync), but the compiler only lets a program see one after
+/// it imports it.
+let private nativeGlobals = [ "print" ]
 
 /// What a `pub` top-level declaration exports (`docs/PLAN-0.3.md`
 /// decision 6). A class or trait exports the member set an importer needs
@@ -1086,8 +1088,8 @@ type ExportedSymbol = { Name: string; Kind: ExportKind }
 /// `Qualified` the exporting module's qualified global it refers to.
 type ImportBinding = { Local: Token; Qualified: string; Kind: ExportKind }
 
-/// The result of resolving one compilation unit (the prelude, or a single
-/// module's source file) in isolation. `DeclaredGlobals` is every
+/// The result of resolving one compilation unit (a single module's source
+/// file) in isolation. `DeclaredGlobals` is every
 /// top-level `var`/`fun`/`class` name the unit itself declared (never
 /// the natives, `rootGlobals` or imports it was seeded with) -- `Modules.fs`
 /// uses it to qualify exactly those names when linking several units into
@@ -1100,10 +1102,10 @@ type ResolvedUnit =
       DeclaredGlobals: Set<string>
       Exports: ExportedSymbol list }
 
-/// Shared implementation behind `resolve`/`resolveWithExemptGlobals`/
-/// `resolveUnit` below. `rootGlobals` are extra immutable global names
+/// Shared implementation behind `resolve`/`resolveUnit`/
+/// `resolveUnitWithHints` below. `rootGlobals` are extra immutable global names
 /// pre-seeded exactly like `nativeGlobals` (declared by some *other*
-/// unit, typically the prelude, that this unit may reference but did not
+/// unit (for a built-in `std.*` module, the VM natives) that this unit may reference but did not
 /// itself declare -- so redeclaring one is the same "already declared"
 /// error, and none are ever checked for unused-ness here). `imports` are
 /// the already-validated names this unit's `import` statements bring in
@@ -1112,9 +1114,9 @@ type ResolvedUnit =
 let private resolveInternal
     (linked: bool)
     (rootGlobals: string list)
+    (importHints: Map<string, string>)
     (imports: ImportBinding list)
     (stmts: Stmt list)
-    (exemptGlobalNames: Set<string>)
     : ResolvedUnit =
     // Unwrap every top-level `pub`, remembering which names it exported,
     // and set aside `import`s (the linker already consumed them).
@@ -1194,7 +1196,7 @@ let private resolveInternal
     // error instead of silently vanishing.
     let nonTraitStmts = stmts |> List.filter (function TraitStmt _ -> false | _ -> true)
 
-    let resolver = Resolver(globals, globalDecls, aliases, classes, effectiveMembers)
+    let resolver = Resolver(globals, globalDecls, aliases, importHints, classes, effectiveMembers)
     let bound = nonTraitStmts |> List.map resolver.ResolveStmt
     // Both must run after every top-level/class/method body above has
     // resolved, so `usedSelfNames`/`usedGlobalNames` (populated along the
@@ -1202,7 +1204,7 @@ let private resolveInternal
     resolver.CheckUnusedClassMembers()
     // A `pub` declaration is part of the module's public surface, used or
     // not within this file -- same reasoning as `pub` class members.
-    resolver.CheckUnusedGlobals(Set.union exemptGlobalNames (Set.ofSeq exportedNames))
+    resolver.CheckUnusedGlobals(Set.ofSeq exportedNames)
 
     // An import is "used" if the name is ever read -- including as an
     // `extends`/`with` operand, which resolves through `resolveReference`
@@ -1264,18 +1266,23 @@ let private asTuple (r: ResolvedUnit) = r.Bound, r.Errors, r.Warnings
 /// resolution continues, since (unlike a syntax error) a semantic error
 /// doesn't prevent understanding the rest of the program's structure.
 let resolve (stmts: Stmt list) : BoundStmt list * ResolveError list * ResolveError list =
-    resolveInternal false [] [] stmts Set.empty |> asTuple
-
-/// Like `resolve`, but never warns about an unused top-level `var`/`fun`
-/// whose name is in `exemptGlobalNames`, regardless of whether the
-/// program actually reads it (used where the prelude is still textually
-/// merged into the same unit as user code).
-let resolveWithExemptGlobals (stmts: Stmt list) (exemptGlobalNames: Set<string>) : BoundStmt list * ResolveError list * ResolveError list =
-    resolveInternal false [] [] stmts exemptGlobalNames |> asTuple
+    resolveInternal false [] Map.empty [] stmts |> asTuple
 
 /// Resolves one compilation unit in isolation (`docs/PLAN-0.3.md` Phases
-/// 4-5): `rootGlobals` are names another unit (the prelude) declares that
+/// 4-5): `rootGlobals` are names another unit declares that
 /// this one may reference as ordinary immutable globals, and `imports` are
 /// the names its `import` statements bring in.
 let resolveUnit (rootGlobals: string list) (imports: ImportBinding list) (stmts: Stmt list) : ResolvedUnit =
-    resolveInternal true rootGlobals imports stmts Set.empty
+    resolveInternal true rootGlobals Map.empty imports stmts
+
+/// `resolveUnit` plus `importHints` (standard-library name -> the module that
+/// exports it): an unresolved reference to one of those names is a
+/// compile-time "add this import" error instead of being left for the
+/// runtime, which would find the VM's bare-named native and silently succeed.
+let resolveUnitWithHints
+    (rootGlobals: string list)
+    (importHints: Map<string, string>)
+    (imports: ImportBinding list)
+    (stmts: Stmt list)
+    : ResolvedUnit =
+    resolveInternal true rootGlobals importHints imports stmts

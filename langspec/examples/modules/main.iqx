@@ -8,13 +8,15 @@
     file -- the VM never knows the program came from several sources.
 
     `import a.b.name` brings `name` from module `a.b` in unqualified;
+    `import a.b.{x, y}` brings several names from one module (the braces
+    just save repeating the module path, and may span lines);
     `as` renames it locally (needed to resolve a name collision, which
     is otherwise a compile-time error). Imported names are read-only.
     `import` is only allowed at the top level of a file.
 #>
 
-import math.vector.double, math.vector.origin as zero
-import shapes.Shape, shapes.Named
+import math.vector.{double, origin as zero}
+import shapes.{Shape, Named}
 
 # An imported class can be extended; an imported trait can be `use`d.
 class Square extends Shape {

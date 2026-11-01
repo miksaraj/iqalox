@@ -1,5 +1,9 @@
 # Plan: getting to 0.1-poc
 
+> **Note (added in `0.3` Phase 6):** this log refers to files that are no longer kept in the tree
+> — `docs/LANGUAGE-0.1.md`, `docs/LANGUAGE-POC.md`, `langspec/versions/<n>/`, `langspec/archived/` —
+> by their old paths. Git tags preserve them; see [`EARLIER-VERSIONS.md`](EARLIER-VERSIONS.md).
+
 > **Note (post-`0.1` repo reorg):** `0.1-poc`'s code moved to `poc/` (was
 > the repository root) as part of `docs/PLAN-0.1.md`'s Phase 0. The `src/`/
 > `tests/`/`tools/` paths throughout this document describe the

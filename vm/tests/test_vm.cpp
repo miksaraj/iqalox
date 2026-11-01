@@ -825,7 +825,7 @@ TEST_CASE("concat with a non-vector argument is a clean runtime error, not a cra
 TEST_CASE("push/pop/length/reverse are present as globals without any user declaration", "[vm][natives]") {
     // docs/PLAN-0.2.md Phase 5: true natives (need direct ObjVector
     // access), unlike map/filter/reduce/sort which are ordinary Iqalox
-    // source (compiler/src/Prelude.fs) prepended to every program.
+    // source (compiler/src/Stdlib.fs), compiled in when imported.
     Vm vm;
     REQUIRE(vm.getGlobal("push") != nullptr);
     REQUIRE(vm.getGlobal("pop") != nullptr);
@@ -1019,7 +1019,7 @@ TEST_CASE("reverse on a non-vector is a runtime error", "[vm][natives]") {
 
 TEST_CASE("transpose/multiply/add/subtract are present as globals without any user declaration", "[vm][natives]") {
     // docs/PLAN-0.2.md Phase 6: none of these four call back into user
-    // code, so (unlike elementwise, compiler/src/Prelude.fs) they're
+    // code, so (unlike elementwise, compiler/src/Stdlib.fs) they're
     // true natives too, matching push/pop/length/reverse's pattern.
     Vm vm;
     REQUIRE(vm.getGlobal("transpose") != nullptr);

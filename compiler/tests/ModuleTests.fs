@@ -33,7 +33,6 @@ let private names (r: Result<ModuleSource list, string list>) =
     | Ok ms -> ms |> List.map (fun m -> m.Name)
     | Error e -> failwith $"expected Ok, got %A{e}"
 
-let private prelude () = resolveUnit [] [] (parseText Iqalox.Prelude.source)
 
 [<Fact>]
 let ``a module's name is its path relative to the root, dotted`` () =
@@ -87,7 +86,7 @@ let ``a module that fails to load surfaces the callback's error lines`` () =
 
 let private link (files: (string * string * string list) list) =
     match loadModules (pathOf "main") (loader files) with
-    | Ok ms -> linkModules (prelude ()) ms
+    | Ok ms -> linkModules ms
     | Error e -> failwith $"%A{e}"
 
 [<Fact>]
@@ -96,7 +95,7 @@ let ``two modules may each declare the same top-level name without a clash`` () 
     Assert.All(linked.Diagnostics, fun d -> Assert.Empty d.Errors)
 
 [<Fact>]
-let ``a non-entry module's globals are qualified and the entry's are not`` () =
+let ``every module's globals are qualified with its own name, the entry module's included`` () =
     let linked = link [ "main", "var helper = 1", [ "dep" ]; "dep", "var helper = 2", [] ]
     let declared =
         linked.Bound
@@ -104,7 +103,7 @@ let ``a non-entry module's globals are qualified and the entry's are not`` () =
             | BVarStmt(DeclaredGlobal n, _, _) -> Some n
             | _ -> None)
     Assert.Contains("dep::helper", declared)
-    Assert.Contains("helper", declared)
+    Assert.Contains("main::helper", declared)
 
 [<Fact>]
 let ``references inside a module follow its qualified names, including calls and classes`` () =
@@ -128,22 +127,9 @@ let ``references inside a module follow its qualified names, including calls and
     Assert.Equal<string list>([ "dep::C" ], classes)
 
 [<Fact>]
-let ``prelude names stay unqualified and are callable from any module`` () =
-    let linked = link [ "main", "print 1", [ "dep" ]; "dep", "print map (x) -> x, [1]", [] ]
+let ``a module needs no import to declare a name the standard library also uses`` () =
+    let linked = link [ "main", "print 1", [ "dep" ]; "dep", "var map = 1\nprint map", [] ]
     Assert.All(linked.Diagnostics, fun d -> Assert.Empty d.Errors)
-    let found =
-        linked.Bound
-        |> List.exists (function
-            | BExpressionStmt(BCall(_, [ BCall(BVariable(GlobalBinding "map", _), _) ])) -> true
-            | _ -> false)
-    Assert.True found
-
-[<Fact>]
-let ``redeclaring a prelude name inside a module is still an already-declared error`` () =
-    let linked = link [ "main", "print 1", [ "dep" ]; "dep", "var map = 1", [] ]
-    let dep = linked.Diagnostics |> List.find (fun d -> d.Module = "dep")
-    Assert.Single dep.Errors |> ignore
-    Assert.Contains("already declared", dep.Errors.Head.Message)
 
 [<Fact>]
 let ``diagnostics are attributed to the module that produced them`` () =
@@ -171,8 +157,10 @@ let private linkAuto (files: (string * string) list) =
             let stmts = parseText source
             Ok(stmts, importedModuleNames stmts)
         | None -> Error [ $"missing {path}" ]
-    match loadModules (pathOf "main") parseFile with
-    | Ok ms -> linkModules (prelude ()) ms
+    let builtin name =
+        Iqalox.Stdlib.tryFind name |> Option.map (fun m -> Ok(parseText m.Source), m.Natives)
+    match loadModulesWith builtin (pathOf "main") parseFile with
+    | Ok ms -> linkModules ms
     | Error e -> failwith $"%A{e}"
 
 let private errorsOf (linked: LinkedProgram) (moduleName: string) =
@@ -245,9 +233,9 @@ let ``two imports claiming the same local name is an already-declared error`` ()
     Assert.Contains("Variable 'f' already declared.", errorsOf linked "main")
 
 [<Fact>]
-let ``an import colliding with a prelude name is an already-declared error`` () =
-    let linked = linkAuto [ "main", "import dep.map"; "dep", "pub fun map() {\n    return 1\n}" ]
-    Assert.Contains("Variable 'map' already declared.", errorsOf linked "main")
+let ``an import colliding with the ambient print is an already-declared error`` () =
+    let linked = linkAuto [ "main", "import dep.show as print"; "dep", "pub fun show() {\n    return 1\n}" ]
+    Assert.Contains("Variable 'print' already declared.", errorsOf linked "main")
 
 [<Fact>]
 let ``an imported variable is read-only even if the exporter declared it mut`` () =
@@ -361,17 +349,17 @@ let ``an imported trait used only by a use clause counts as used`` () =
 // --- file names in the compiled program ---
 
 [<Fact>]
-let ``each module's instructions are stamped with its own file, prelude included`` () =
+let ``each module's instructions are stamped with its own file, built-in modules included`` () =
     let linked =
         linkAuto
-            [ "main", "import dep.f\nprint f()"
+            [ "main", "import dep.f\nimport std.vector.map\nprint f()\nprint map (x) -> x, [1]"
               "dep", "pub fun f() {\n    return 1\n}" ]
     let chunk, fileNames, errors = compileSegments linked.Segments
     Assert.Empty errors
-    Assert.Equal<string list>([ "<prelude>"; "dep.iqx"; "main.iqx" ], List.ofArray fileNames)
+    Assert.Equal<string list>([ "dep.iqx"; "<std.vector>"; "main.iqx" ], List.ofArray fileNames)
     // Every file index in use is a valid index, the top-level chunk touches
-    // all three files, and the function `f` (declared in dep.iqx, index 1)
-    // is stamped entirely with dep's index.
+    // all three files, `f` (declared in dep.iqx, index 0) is stamped
+    // entirely with dep's index, and `map` entirely with std.vector's (1).
     Assert.All(chunk.Files, fun i -> Assert.InRange(i, 0, 2))
     Assert.Equal<int list>([ 0; 1; 2 ], chunk.Files |> Array.distinct |> Array.sort |> List.ofArray)
     let protoFor name =
@@ -379,8 +367,8 @@ let ``each module's instructions are stamped with its own file, prelude included
         |> Array.pick (function
             | FunctionConstant p when p.Name = name -> Some p
             | _ -> None)
-    Assert.All((protoFor "f").Chunk.Files, fun i -> Assert.Equal(1, i))
-    Assert.All((protoFor "map").Chunk.Files, fun i -> Assert.Equal(0, i))
+    Assert.All((protoFor "f").Chunk.Files, fun i -> Assert.Equal(0, i))
+    Assert.All((protoFor "map").Chunk.Files, fun i -> Assert.Equal(1, i))
 
 [<Fact>]
 let ``a module in a subdirectory is named by its relative path with forward slashes`` () =
