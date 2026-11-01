@@ -154,7 +154,8 @@ plan.
 
 ## 2. Open questions (flagged, not decided)
 
-1. **Whether `0.2`'s array-manipulation standard library (`push`, `pop`,
+1. **RESOLVED in Phase 6** (see that phase's entry in §5 for the decision
+   and its consequences). Original question, kept for the record: **Whether `0.2`'s array-manipulation standard library (`push`, `pop`,
    `length`, `reverse`, `map`, `filter`, `reduce`, `sort`) should move
    under a real module namespace now that one exists, and/or become
    `import`-gated instead of always-injected globals.** `ROADMAP.md`'s
@@ -238,7 +239,7 @@ each one, verified via new tests (§6).
 | List comprehension guard clause | §1.1 | Done |
 | Unused-variable compile-time warning | §2.3 | Done |
 | Module support (file-based, `import`, compile-time-only) | §1.4-9 | Done |
-| Array-manipulation stdlib namespace revisit | §2.1 | Not started (open question) |
+| Array-manipulation stdlib behind imports | §2.1 | Done |
 | First set of compiler optimizations | §2.2 | Not started |
 
 ## 5. Suggested sequencing
@@ -674,10 +675,85 @@ Known limitations, deliberately not papered over:
   home module's bindings; flagged for the repository owner rather than
   guessed at.
 
-**Phase 6 — Revisit: array-manipulation stdlib under a namespace.**
-Blocked on open question 1 — raise it with the repository owner once
-Phase 5 has landed and real module semantics exist to make the question
-concrete, rather than guessing now.
+**Phase 6 — Array-manipulation stdlib behind imports — done.** Open
+question 1 was the one the repository owner had been dreading and
+postponing ("no clearly better answer"), so it was analysed and discussed
+before anything was built, and then decided in their words:
+
+- *Users must be able to define their own `sort`* (and `max`, `add`, ...).
+- *An import line is acceptable ceremony.*
+- *"No silent shadowing" is a language-wide principle* — which rules out
+  the Rust-style alternative of an implicit prelude that user code may
+  silently shadow.
+- *`print` is core and always available* with no import.
+- Layout (asked separately): **by category under `std`** —
+  `std.vector` (`push`, `pop`, `length`, `reverse`, `concat`, `map`,
+  `filter`, `reduce`, `sort`) and `std.matrix` (`transpose`, `multiply`,
+  `add`, `subtract`, `elementwise`), with `concat` imported like the rest.
+  Later versions' libraries (`std.string`, `std.math`, ...) slot in under
+  the same root.
+
+Two things the discussion surfaced that shaped the design. First, the
+spelling question was already settled by decisions 5/9 (names are imported
+bare; there are no qualified references, and `|>` takes a bare name on its
+right), so the original roadmap sketch `Vector.map` is dead: "namespace"
+means "lives in a module you import from". Second, the reservation problem
+compounds — `add`/`sort`/`length`/... were already unusable as user names,
+`max` would have been lost to `0.4`'s math library, and every future ambient
+name would have been a breaking change for any program that happened to use
+it; import-gated additions never are.
+
+Implementation. `Prelude.fs` became `Stdlib.fs`: a `BuiltinModule` is a
+list of **natives** (VM-registered, exported under their bare runtime
+names) plus an Iqalox **source** (compiled like any module, but only when
+imported — a program that imports nothing no longer carries the five prelude
+functions it used to: `print 1` compiles to 106 bytes of bytecode instead of 3,266). The loader
+(`Modules.loadModulesWith`) finds a built-in module by name; a user file
+that would collide with one (`std/vector.iqx`) is a compile error, not an
+override, following the same principle. The Resolver's ambient natives
+shrank to just `print`.
+
+Making user-defined `sort` *safe* needed real engineering, not just removing
+a reservation. The runtime's global table is flat and natives sit in it under
+bare names, so a user's own `push` in an unqualified entry module would have
+silently clobbered the native that `std.vector.map` calls. So **every module
+is now qualified, the entry module included** (`main::sort`); single-file
+programs therefore no longer compile to the same bytecode as before, and
+the VM strips the `module::` prefix from the one place a global's name
+reaches a user (`Undefined variable 'x'`, `Variable 'x' accessed before
+being assigned a value`).
+
+A second consequence: the resolver deliberately leaves an unknown global to
+the runtime, and the VM still registers every native, so a program calling
+`push` *without* importing it would have compiled and worked — making the
+gating decorative. `Stdlib.importHints` (every exported name → its module)
+turns that into a compile-time error that says what to do: `'push' is part
+of the standard library and isn't in scope; add 'import std.vector.push'.`
+Built-in modules' own warnings are dropped and their errors reported as
+internal compiler errors; the prelude exemption added in Phase 3's follow-up
+(`resolveWithExemptGlobals`) had no remaining purpose and was removed.
+
+Migration (a breaking change, accepted — pre-`1.0`): the seven example
+programs that used stdlib names gained `import` lines (the compiler's hint
+errors named every missing one), and `docs/LANGUAGE.md` §13 was rewritten
+around the import-gated model. Verification beyond the unit tests: the
+**old** compiler (from `main`) compiling the **old** examples was diffed
+against the new compiler compiling the new examples — identical output for
+all 15 — and the multi-file example, user-defined `sort`/`max`, forgotten
+imports, import-vs-own-declaration, and the shadowing check were exercised
+through the real CLI and VM. New tests: `StdlibTests.fs` (17: built-in
+sources parse and match their declared exports, only `print` is ambient,
+user-defined library names allowed, the hint error, native vs source
+bindings, `as`, collision, unused std import warns, modules compiled only
+when imported, built-in diagnostics flagged, file-shadowing error, the whole
+library linking and compiling); the Phase 4/5 tests that assumed an
+unqualified entry module or a prelude were reworked, and the dead
+`resolveWithExemptGlobals` and its two tests removed (net 309 xUnit; Catch2
+unchanged at 114, since `vm/` only gained the message-prefix stripping).
+
+Phase 4/5 entries above describe the module machinery as first built (a
+textually merged prelude, an unqualified entry module); read them as history
+— Phase 6 is what changed those two things.
 
 **Phase 7 — First set of compiler optimizations.** Proposed: constant
 propagation plus dead code elimination (open question 2). Needs its own

@@ -403,6 +403,21 @@ used, and this section mirrors for `CLAUDE.md` itself); every top-level
 `compiler/`+`vm/` toolchain; `ROADMAP.md` marks `0.2` delivered and moves
 the active-target goalposts to `0.3`.
 
+## Architecture (`compiler/` + `vm/`, 0.3, in progress)
+
+See `docs/PLAN-0.3.md` (the decision log and per-phase writeups). Phases 1-6
+have landed: negative indices and slices; multi-generator/guarded list
+comprehensions; unused-variable/-import warnings; multi-file compilation
+(`compiler/src/Modules.fs`: path-derived module names, an `import` statement,
+`pub` as the export marker, one `.iqbc` out, no `vm/` involvement beyond a
+file table in bytecode format v3 so runtime errors name their source file);
+and an import-gated standard library. **Phase 6 supersedes the `0.2`
+description above of a textually-prepended prelude**: `compiler/src/Prelude.fs`
+is now `Stdlib.fs`, a set of built-in `std.*` modules (`std.vector`,
+`std.matrix`) a program must `import`; `print` is the only ambient name; every
+module (the entry file too) has its globals qualified (`main::x`) so a user's
+own `sort`/`push` can never clobber a native in the VM's flat global table.
+
 ## Engineering conventions
 
 - **`poc/` Python style**: match what's there — 4-space indents, type hints

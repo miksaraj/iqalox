@@ -182,21 +182,17 @@ questions, and phased sequencing:
   `module` declarations existed, turned out to need no new design work
   under this shape — a trait or class is just an ordinary importable
   top-level declaration like any other (`docs/PLAN-0.3.md` decision 9).
-- **Revisit whether `0.2`'s array-manipulation stdlib (`length`, `push`,
-  `pop`, `reverse`, `map`, `filter`, `reduce`, `sort` —
-  `docs/PLAN-0.2.md` Phase 5) should move under a namespace (`Vector.map`)
-  and/or become opt-in via explicit inclusion, now that real module
-  support exists to make that meaningful.** Deliberately shipped in `0.2`
-  as flat, always-injected globals (`compiler/src/Prelude.fs`, matching
-  `print`/`concat`'s existing precedent) rather than guessed toward a
-  namespaced/gated shape — building either before module support existed
-  would have meant starting real module-system design work early, inside
-  a stdlib-functions phase, ahead of module support's own entry. Moved
-  here alongside module support itself, since this is exactly the version
-  where its precondition ("real module support exists") is first met.
-  Explicitly not a silent lock-in: still an open question
-  (`docs/PLAN-0.3.md` §2 item 1), to be raised with the repository owner
-  once module support itself has landed and the question is concrete.
+- **Array-manipulation standard library moved behind imports — resolved
+  (`docs/PLAN-0.3.md` Phase 6).** `0.2` shipped it as flat, always-injected
+  globals; with module support in place the repository owner decided that
+  users must be able to define their own `sort`/`max`/`add`, that "no
+  silent shadowing" is language-wide, and that an import line is acceptable
+  ceremony. So the whole library is import-gated under built-in `std.*`
+  modules (`std.vector`, `std.matrix`, with `std.string`, `std.math`, ...
+  to come in `0.4`-`0.8`), and `print` is the only name available without
+  an import. Names are imported bare (`import std.vector.map`), not
+  qualified — the `Vector.map` spelling this entry originally floated was
+  dropped along with qualified references generally.
 - First set of compiler optimizations (see below) — proposed as constant
   propagation plus dead code elimination (`docs/PLAN-0.3.md` §2 item 2),
   not yet separately confirmed.

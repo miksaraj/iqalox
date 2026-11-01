@@ -24,15 +24,6 @@ let private resolveSourceWithWarnings (source: string) : BoundStmt list * Resolv
     let stmts, _ = parse tokens
     resolve stmts
 
-/// Scans and parses `source` into a `Stmt list` without resolving it --
-/// for tests exercising `resolveWithExemptGlobals` directly, which (unlike
-/// `resolve`) takes an already-parsed `Stmt list` plus the exempt-name set.
-let private parseSource (source: string) : Stmt list =
-    let source = if source.EndsWith "\n" then source else source + "\n"
-    let tokens, _ = scanTokens source
-    let stmts, _ = parse tokens
-    stmts
-
 [<Fact>]
 let ``a top-level var resolves as a global`` () =
     let bound, errors = resolveSource "var x = 1\nx"
@@ -221,10 +212,17 @@ let ``assigning to a native global like print is a compile error`` () =
     Assert.Contains("immutable", errors.[0].Message)
 
 [<Fact>]
-let ``redeclaring a native global like concat is a compile error`` () =
-    let _, errors = resolveSource "var concat = 1"
+let ``redeclaring the ambient print is a compile error`` () =
+    let _, errors = resolveSource "var print = 1"
     Assert.Single errors |> ignore
     Assert.Contains("already declared", errors.[0].Message)
+
+[<Fact>]
+let ``a library native like concat is not ambient, so declaring it is fine`` () =
+    // docs/PLAN-0.3.md Phase 6: only `print` is reserved; the rest of the
+    // natives live in std.* modules a program must import.
+    let _, errors = resolveSource "var concat = 1\nprint concat"
+    Assert.Empty errors
 
 [<Fact>]
 let ``LocalCount includes self plus every declared local`` () =
@@ -742,16 +740,3 @@ let ``a never-instantiated top-level class produces no warning -- classes aren't
     let _, errors, warnings = resolveSourceWithWarnings "class Widget {}"
     Assert.Empty errors
     Assert.Empty warnings
-
-[<Fact>]
-let ``resolveWithExemptGlobals never warns about a name in the exempt set, even if truly unused`` () =
-    let _, errors, warnings = resolveWithExemptGlobals (parseSource "var x = 1") (Set.ofList [ "x" ])
-    Assert.Empty errors
-    Assert.Empty warnings
-
-[<Fact>]
-let ``resolveWithExemptGlobals still warns about a top-level name that isn't in the exempt set`` () =
-    let _, errors, warnings = resolveWithExemptGlobals (parseSource "var x = 1\nvar y = 2\nprint y") (Set.ofList [ "y" ])
-    Assert.Empty errors
-    Assert.Single warnings |> ignore
-    Assert.Contains("Variable 'x' is never used", warnings.[0].Message)

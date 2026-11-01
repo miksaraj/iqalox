@@ -10,6 +10,15 @@ namespace iqalox {
 
 namespace {
 
+// A global's key in the table is module-qualified by the compiler
+// (`main::x`, `math.vector::helper` -- `compiler/src/Modules.fs`); the user
+// only ever wrote `x`/`helper`, so error messages show what follows the last
+// `::`. A bare name (a native like `print`) is returned unchanged.
+std::string displayGlobalName(const std::string& qualified) {
+    auto pos = qualified.rfind("::");
+    return pos == std::string::npos ? qualified : qualified.substr(pos + 2);
+}
+
 constexpr size_t kMaxFrames = 1024;
 constexpr size_t kGcHeapGrowFactor = 2;
 
@@ -31,18 +40,22 @@ double pythonStyleModulo(double a, double b) {
 Vm::Vm() { defineNatives(); }
 
 void Vm::defineNatives() {
+    // Every native is registered here under its bare name, but `compiler/`
+    // only lets a program *see* one after importing it from a `std.*` module
+    // (docs/PLAN-0.3.md Phase 6) -- only `print` is ambient. Keep this list
+    // in sync with compiler/src/Stdlib.fs and Resolver.fs's `nativeGlobals`.
     globals["print"] = objValue(allocate<ObjNativeFunction>("print", 1, nativePrint));
     globals["concat"] = objValue(allocate<ObjNativeFunction>("concat", 1, nativeConcat));
     // docs/PLAN-0.2.md Phase 5: push/pop/length/reverse need direct access
     // to an ObjVector's own element list, so they're true natives; map/
-    // filter/reduce/sort don't (see compiler/src/Prelude.fs) -- they're
-    // ordinary Iqalox functions the compiler prepends to every program.
+    // filter/reduce/sort don't (see compiler/src/Stdlib.fs) -- they're
+    // ordinary Iqalox functions in the built-in std.* modules.
     globals["push"] = objValue(allocate<ObjNativeFunction>("push", 2, nativePush));
     globals["pop"] = objValue(allocate<ObjNativeFunction>("pop", 1, nativePop));
     globals["length"] = objValue(allocate<ObjNativeFunction>("length", 1, nativeLength));
     globals["reverse"] = objValue(allocate<ObjNativeFunction>("reverse", 1, nativeReverse));
     // docs/PLAN-0.2.md Phase 6: none of these four call back into user
-    // code, so (unlike elementwise, compiler/src/Prelude.fs) they're
+    // code, so (unlike elementwise, compiler/src/Stdlib.fs) they're
     // true natives too.
     globals["transpose"] = objValue(allocate<ObjNativeFunction>("transpose", 1, nativeTranspose));
     globals["multiply"] = objValue(allocate<ObjNativeFunction>("multiply", 2, nativeMultiply));
@@ -116,7 +129,7 @@ void Vm::checkNotUndef(const Value& value, const std::string& globalName) {
     if (globalName.empty()) {
         runtimeError("Variable accessed before being assigned a value.");
     } else {
-        runtimeError("Variable '" + globalName + "' accessed before being assigned a value.");
+        runtimeError("Variable '" + displayGlobalName(globalName) + "' accessed before being assigned a value.");
     }
 }
 
@@ -438,7 +451,7 @@ void Vm::run() {
                 ObjString* name = stringConstantAt(frame, readU16(frame));
                 auto it = globals.find(name->value);
                 if (it == globals.end()) {
-                    runtimeError("Undefined variable '" + name->value + "'.");
+                    runtimeError("Undefined variable '" + displayGlobalName(name->value) + "'.");
                 }
                 checkNotUndef(it->second, name->value);
                 push(it->second);
@@ -448,7 +461,7 @@ void Vm::run() {
                 ObjString* name = stringConstantAt(frame, readU16(frame));
                 auto it = globals.find(name->value);
                 if (it == globals.end()) {
-                    runtimeError("Undefined variable '" + name->value + "'.");
+                    runtimeError("Undefined variable '" + displayGlobalName(name->value) + "'.");
                 }
                 it->second = peek(0);
                 break;

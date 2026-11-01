@@ -1,3 +1,5 @@
+import std.vector.concat
+
 fun describe(n) {
     print concat [n, " is ", (n % 2 == 0) ? "even" : "odd"]
 }

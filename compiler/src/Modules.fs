@@ -5,20 +5,20 @@
 /// so `iqaloxc` still emits exactly one `.iqbc` file and `vm/` never
 /// learns a program came from more than one source file.
 ///
-/// There is deliberately **no `import` statement yet** (Phase 5): the
-/// loader is told each file's dependencies by whoever parses it
-/// (`loadModules`'s `parse` callback returns them alongside the
-/// statements), so Phase 5 only has to teach that callback to read them
-/// out of the AST. Until then `Program.fs` always reports none.
+/// A module's dependencies come from its top-level `import` statements
+/// (Phase 5; `loadModules`' `parse` callback reports them). The built-in
+/// `std.*` modules (`Stdlib.fs`, Phase 6) are found by name instead of by
+/// path, and a user file that would shadow one is an error.
 ///
 /// Name isolation: each file is resolved *on its own* (`Resolver.
 /// resolveUnit`), so two modules may each declare a top-level `helper`
 /// without an "already declared" clash. Linking then qualifies every
-/// global a non-entry module declared (`math.vector::helper`) by
-/// rewriting the already-resolved `Bound` tree -- safe precisely because
-/// locals are slots by then, so there is no shadowing to get wrong. The
-/// entry module is left unqualified so a single-file program compiles to
-/// byte-identical bytecode as before modules existed.
+/// global a module declared (`math.vector::helper`) by rewriting the
+/// already-resolved `Bound` tree -- safe precisely because locals are
+/// slots by then, so there is no shadowing to get wrong. Since Phase 6
+/// that includes the *entry* module too: the runtime's global table is
+/// flat and the natives live in it under their bare names, so a user
+/// program's own `sort` or `push` must never collide with one.
 module Iqalox.Modules
 
 open System.Collections.Generic
@@ -29,8 +29,16 @@ open Iqalox.Resolver
 
 /// `File` is the module's path relative to the entry file's directory
 /// ("math/vector.iqx"), with `/` separators on every platform -- what
-/// runtime errors report (`Bytecode.fs`' file table).
-type ModuleSource = { Name: string; Path: string; File: string; Stmts: Stmt list }
+/// runtime errors report (`Bytecode.fs`' file table) -- `<std.vector>` for
+/// a built-in module. `IsBuiltin` modules additionally export `Natives`
+/// (VM-registered, bare runtime names) alongside their source's `pub`s.
+type ModuleSource =
+    { Name: string
+      Path: string
+      File: string
+      Stmts: Stmt list
+      IsBuiltin: bool
+      Natives: string list }
 
 /// `math/vector.iqx` (relative to `rootDir`) -> `math.vector`.
 let moduleNameOfPath (rootDir: string) (filePath: string) : string =
@@ -51,7 +59,8 @@ let modulePathOfName (rootDir: string) (moduleName: string) : string =
 /// on; the entry module is last). Each file is parsed once even if
 /// several modules depend on it; a circular dependency is an error, not
 /// an infinite loop.
-let loadModules
+let loadModulesWith
+    (builtin: string -> (Result<Stmt list, string list> * string list) option)
     (entryPath: string)
     (parse: string -> Result<Stmt list * string list, string list>)
     : Result<ModuleSource list, string list> =
@@ -72,18 +81,51 @@ let loadModules
             let joined = String.concat " -> " chain
             errors.Add $"Circular module dependency: {joined}."
         else
+          match builtin name with
+          | Some(parsed, natives) ->
+            // A built-in module is found by name; a user file at the same
+            // path would silently shadow it, which the language forbids.
+            if File.Exists path then
+                errors.Add $"Module '{name}' is built in; the file '{path}' would shadow it."
+            else
+                match parsed with
+                | Error lines -> errors.AddRange lines
+                | Ok stmts ->
+                    let source =
+                        { Name = name
+                          Path = ""
+                          File = $"<{name}>"
+                          Stmts = stmts
+                          IsBuiltin = true
+                          Natives = natives }
+                    finished.[name] <- source
+                    order.Add source
+          | None ->
             match parse path with
             | Error lines -> errors.AddRange lines
             | Ok(stmts, imports) ->
                 for imported in imports do
                     visit (name :: stack) imported (modulePathOfName rootDir imported)
                 let file = Path.GetRelativePath(rootDir, Path.GetFullPath path).Replace('\\', '/')
-                let source = { Name = name; Path = path; File = file; Stmts = stmts }
+                let source =
+                    { Name = name
+                      Path = path
+                      File = file
+                      Stmts = stmts
+                      IsBuiltin = false
+                      Natives = [] }
                 finished.[name] <- source
                 order.Add source
 
     visit [] (moduleNameOfPath rootDir entryFull) entryFull
     if errors.Count > 0 then Error(List.ofSeq errors) else Ok(List.ofSeq order)
+
+/// `loadModulesWith` with no built-in modules.
+let loadModules
+    (entryPath: string)
+    (parse: string -> Result<Stmt list * string list, string list>)
+    : Result<ModuleSource list, string list> =
+    loadModulesWith (fun _ -> None) entryPath parse
 
 // --- qualifying a resolved module's own globals ---
 
@@ -161,12 +203,13 @@ let qualifyModule (moduleName: string) (declaredGlobals: Set<string>) (statement
 type UnitDiagnostics =
     { Module: string
       IsEntry: bool
+      IsBuiltin: bool
       Errors: ResolveError list
       Warnings: ResolveError list }
 
 /// `Bound` is every statement in execution order; `Segments` is the same
-/// statements grouped by the source file each came from (the prelude is
-/// `"<prelude>"`), for `Codegen.compileSegments`.
+/// statements grouped by the source file each came from (a built-in module
+/// is `"<std.vector>"` etc.), for `Codegen.compileSegments`.
 type LinkedProgram =
     { Bound: BoundStmt list
       Segments: (string * BoundStmt list) list
@@ -188,6 +231,7 @@ let importedModuleNames (stmts: Stmt list) : string list =
 /// Dependency order guarantees every imported module is in `resolved`.
 let private bindImports
     (resolved: Dictionary<string, ResolvedUnit>)
+    (natives: Dictionary<string, string list>)
     (stmts: Stmt list)
     : ImportBinding list * ResolveError list =
     let bindings = ResizeArray<ImportBinding>()
@@ -201,6 +245,17 @@ let private bindImports
                 match resolved.TryGetValue moduleName with
                 | false, _ ->
                     errors.Add { Message = $"Unknown module '{moduleName}'."; Token = item.Module.Head }
+                | true, exporter when
+                    (match natives.TryGetValue moduleName with
+                     | true, names -> List.contains memberName names
+                     | false, _ -> false)
+                    ->
+                    // A built-in module's native: binds straight to the
+                    // VM's bare runtime name, not a module-qualified one.
+                    bindings.Add
+                        { Local = defaultArg item.Alias item.Name
+                          Qualified = memberName
+                          Kind = ExportFun }
                 | true, exporter ->
                     match exporter.Exports |> List.tryFind (fun e -> e.Name = memberName) with
                     | Some symbol ->
@@ -217,32 +272,37 @@ let private bindImports
         | _ -> ()
     List.ofSeq bindings, List.ofSeq errors
 
-/// Resolves every module (each in isolation, seeded with the prelude's
-/// declared names as ordinary immutable root globals and with whatever
-/// its own `import`s bring in from already-resolved dependencies),
-/// qualifies every non-entry module's own globals, and concatenates the
-/// results: prelude first, then modules in dependency order, entry last --
-/// the same top-to-bottom execution order the old textual prelude merge
-/// gave a single-file program. `modules` must be in `loadModules`' order
-/// (entry last).
-let linkModules (prelude: ResolvedUnit) (modules: ModuleSource list) : LinkedProgram =
-    let rootGlobals = Set.toList prelude.DeclaredGlobals
+/// Resolves every module (each in isolation, seeded with whatever its own
+/// `import`s bring in from already-resolved dependencies -- plus, for a
+/// built-in module, the natives, visible to its own source as bare root
+/// globals), qualifies every module's own globals (the entry module's
+/// too), and concatenates the results in dependency order, entry last.
+/// `modules` must be in `loadModules`' order.
+let linkModules (modules: ModuleSource list) : LinkedProgram =
     let lastIndex = List.length modules - 1
     let resolvedByName = Dictionary<string, ResolvedUnit>()
+    let nativesByModule = Dictionary<string, string list>()
+    for m in modules do
+        if m.IsBuiltin then
+            nativesByModule.[m.Name] <- m.Natives
     let resolved =
         modules
         |> List.mapi (fun i m ->
-            let imports, importErrors = bindImports resolvedByName m.Stmts
-            let unit = resolveUnit rootGlobals imports m.Stmts
+            let imports, importErrors = bindImports resolvedByName nativesByModule m.Stmts
+            // A built-in module sees the natives as bare root globals and
+            // needs no hints; every user module gets the hint table.
+            let rootGlobals, hints =
+                if m.IsBuiltin then Iqalox.Stdlib.allNatives, Map.empty else [], Iqalox.Stdlib.importHints
+            let unit = resolveUnitWithHints rootGlobals hints imports m.Stmts
             resolvedByName.[m.Name] <- unit
-            let isEntry = (i = lastIndex)
-            let bound = if isEntry then unit.Bound else qualifyModule m.Name unit.DeclaredGlobals unit.Bound
+            let bound = qualifyModule m.Name unit.DeclaredGlobals unit.Bound
             (m.File, bound),
             { Module = m.Name
-              IsEntry = isEntry
+              IsEntry = (i = lastIndex)
+              IsBuiltin = m.IsBuiltin
               Errors = importErrors @ unit.Errors
               Warnings = unit.Warnings })
-    let segments = ("<prelude>", prelude.Bound) :: (resolved |> List.map fst)
+    let segments = resolved |> List.map fst
     { Bound = segments |> List.collect snd
       Segments = segments
       Diagnostics = resolved |> List.map snd }

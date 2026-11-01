@@ -11,6 +11,8 @@
     a *second* `|` after the generator list.
 #>
 
+import std.vector.push
+
 var tail = [2, 3, 4]
 var consed = [1 | tail]
 print consed

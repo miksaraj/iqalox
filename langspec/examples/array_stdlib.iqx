@@ -1,10 +1,15 @@
 <#
-    Array-manipulation standard library (0.2, docs/PLAN-0.2.md Phase 5):
+    Array-manipulation standard library (0.2, docs/PLAN-0.2.md Phase 5),
+    import-gated since 0.3 (docs/PLAN-0.3.md Phase 6): everything lives in
+    the built-in `std.vector` module and must be imported by name.
     push/pop/length/reverse are true natives; map/filter/reduce/sort are
-    ordinary Iqalox functions the compiler prepends to every program (see
-    compiler/src/Prelude.fs) -- push/pop mutate their vector argument in
-    place, the rest return a new vector, leaving the original untouched.
+    ordinary Iqalox functions (compiler/src/Stdlib.fs) -- push/pop mutate
+    their vector argument in place, the rest return a new vector, leaving
+    the original untouched.
 #>
+
+import std.vector.length, std.vector.push, std.vector.pop, std.vector.reverse
+import std.vector.map, std.vector.filter, std.vector.reduce, std.vector.sort
 
 var v = [1, 2, 3]
 print length v

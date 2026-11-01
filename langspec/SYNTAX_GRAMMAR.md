@@ -152,9 +152,11 @@ own top-level grammar grew from `0.1`'s.
   valid at the top level of a file, in any position. These are semantic
   rules, not grammar: imported names are read-only bindings; importing a
   name that collides with a local declaration, another import, a native
-  or a prelude name is an "already declared" error unless renamed with
+  or `print` (the only ambient name) is an "already declared" error unless renamed with
   `as`; importing a non-`pub` declaration is an error. `import` and `as`
-  are reserved words.
+  are reserved words. The standard library is a set of built-in modules
+  under `std` (`std.vector`, `std.matrix`) imported the same way
+  (`docs/PLAN-0.3.md` Phase 6); only `print` needs no import.
 ##
     program         → declaration* EOF ;
 

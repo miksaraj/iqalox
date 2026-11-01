@@ -5,15 +5,19 @@
     (the dedicated stdlib below): transpose/multiply/add/subtract are
     true natives with clean shape-validation errors; elementwise takes a
     combining function and is ordinary Iqalox source instead (see
-    compiler/src/Prelude.fs), so its own shape-mismatch behavior falls
+    compiler/src/Stdlib.fs), so its own shape-mismatch behavior falls
     through to the ordinary index-out-of-range error rather than a
-    dedicated one.
+    dedicated one. All five live in the built-in `std.matrix` module
+    and must be imported (0.3, docs/PLAN-0.3.md Phase 6).
 
     One line: every newline scans as an implicit statement-ending
     semicolon with no bracket-depth awareness (0.1's scanner, unchanged
     here), so a vector literal -- nested or not -- can't span multiple
     lines yet. Not something this phase's scope (indexing) touches.
 #>
+
+import std.matrix.transpose, std.matrix.multiply, std.matrix.add, std.matrix.subtract
+import std.matrix.elementwise
 
 var matrix = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
 
