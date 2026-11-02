@@ -222,13 +222,10 @@ DIGIT       → '0'...'9'
 ```
 
 - **Numbers** are always floating-point — there is no separate integer
-  type (`5` and `5.0` are the same value). Printing a number on its own
-  drops a trailing `.0`, so `print 5` prints `5`, not `5.0` (see
-  [§13](#13-the-standard-library)). **Inside a vector, however, each
-  element is shown in its debug form**: numbers keep their `.0`
-  (`print [1, 2]` prints `[1.0, 2.0]`) and strings are single-quoted
-  (`print ["a"]` prints `['a']`); `nil` and booleans print as usual. The
-  examples below show this real output in their comments.
+  type (`5` and `5.0` are the same value). Printing drops a trailing `.0`, so `print 5` prints `5`, not `5.0` (see
+  [§13](#13-the-standard-library)). The same rule applies to each element
+  of a printed vector: `print [1, "a"]` prints `[1, a]` (no `.0`, strings
+  unquoted).
 - **Strings** may use single or double quotes interchangeably. Escape
   sequences are processed inside string literals — `\n` `\t` `\r` `\\`
   `\'` `\"` `\0` are recognized; any other character after a backslash is
@@ -663,11 +660,11 @@ from-the-end convention as single-index access:
 
 ```
 var v = [10, 20, 30, 40, 50]
-print v[1:3]    # [20.0, 30.0, 40.0] -- inclusive of index 3
-print v[:2]     # [10.0, 20.0, 30.0]
-print v[3:]     # [40.0, 50.0]
-print v[:]      # [10.0, 20.0, 30.0, 40.0, 50.0] -- a full copy
-print v[-2:-1]  # [40.0, 50.0]
+print v[1:3]    # [20, 30, 40] -- inclusive of index 3
+print v[:2]     # [10, 20, 30]
+print v[3:]     # [40, 50]
+print v[:]      # [10, 20, 30, 40, 50] -- a full copy
+print v[-2:-1]  # [40, 50]
 ```
 
 Unlike single-index access, a slice is deliberately more lenient: an
@@ -676,7 +673,7 @@ raising a runtime error, and a `start` that resolves after `stop`
 produces an **empty vector** rather than an error:
 
 ```
-print v[0:100]  # [10.0, 20.0, 30.0, 40.0, 50.0] -- clamped, not an error
+print v[0:100]  # [10, 20, 30, 40, 50] -- clamped, not an error
 print v[3:1]    # [] -- start after stop, not an error
 ```
 
@@ -689,10 +686,10 @@ version.
 
 ```
 var tail = [2, 3, 4]
-print [1 | tail]              # [1.0, 2.0, 3.0, 4.0]
+print [1 | tail]              # [1, 2, 3, 4]
 
 var xs = [1, 2, 3, 4]
-print [x * 2 | x <- xs]       # [2.0, 4.0, 6.0, 8.0]
+print [x * 2 | x <- xs]       # [2, 4, 6, 8]
 ```
 
 Both forms share the same `[expr |` opening syntax and are told apart by
@@ -709,8 +706,8 @@ loops, the first-written generator outermost), and optionally follow the
 generator list with a **second** `|` and a guard expression:
 
 ```
-print [[x, y] | x <- [1, 2], y <- ["a", "b"]]   # [[1.0, 'a'], [1.0, 'b'], [2.0, 'a'], [2.0, 'b']]
-print [n | n <- [1, 2, 3, 4, 5, 6] | n % 2 == 0] # [2.0, 4.0, 6.0]
+print [[x, y] | x <- [1, 2], y <- ["a", "b"]]   # [[1, a], [1, b], [2, a], [2, b]]
+print [n | n <- [1, 2, 3, 4, 5, 6] | n % 2 == 0] # [2, 4, 6]
 ```
 
 A later generator's source expression may reference an earlier
@@ -720,7 +717,7 @@ the outer loop(s), not just once up front:
 ```
 fun upTo(n) { var r = []; for (var i mut = 0; i < n; ++i) { push r, i; } return r; }
 print [[x, y] | x <- [1, 2, 3], y <- upTo(x)]
-# [[1.0, 0.0], [2.0, 0.0], [2.0, 1.0], [3.0, 0.0], [3.0, 1.0], [3.0, 2.0]]
+# [[1, 0], [2, 0], [2, 1], [3, 0], [3, 1], [3, 2]]
 ```
 
 The guard is just an ordinary boolean expression (`==`, `!=`, `and`,
@@ -741,8 +738,8 @@ ternary) around the append when a guard is present.
 ```
 var a = [1, 2]
 var b = [4, 5]
-print [...a, ...b]              # [1.0, 2.0, 4.0, 5.0]
-print [0, ...a, 2.5, ...b, 5]   # [0.0, 1.0, 2.0, 2.5, 4.0, 5.0, 5.0]
+print [...a, ...b]              # [1, 2, 4, 5]
+print [0, ...a, 2.5, ...b, 5]   # [0, 1, 2, 2.5, 4, 5, 5]
 ```
 
 `...expr` inside a plain, comma-separated vector literal splices every
@@ -1077,9 +1074,9 @@ The modules:
 ### Core
 
 - **`print value`** — stringifies `value` (see [§3](#3-values-and-types)'s
-  stringification rules: `nil` → `nil`, a number on its own drops a
-  trailing `.0`, booleans lowercase; elements inside a vector print in debug
-  form, so `[1, 2]` shows as `[1.0, 2.0]`) and writes it followed by a newline. Returns `nil`.
+  stringification rules: `nil` → `nil`, floats drop a trailing `.0`,
+  booleans lowercase; a vector prints as `[e1, e2, ...]` with each element
+  stringified the same way) and writes it followed by a newline. Returns `nil`.
   Always available, no import needed.
 
 ### Array manipulation (`std.vector`)
@@ -1127,10 +1124,10 @@ argument(s):
 import std.vector.{map, filter, reduce, sort}
 
 var v = [3, 1, 4, 1, 5]
-print (map (x) -> x * 2, v)              # [6.0, 2.0, 8.0, 2.0, 10.0]
-print (filter (x) -> x % 2 == 0, v)      # [4.0]
+print (map (x) -> x * 2, v)              # [6, 2, 8, 2, 10]
+print (filter (x) -> x % 2 == 0, v)      # [4]
 print (reduce (a, b) -> a + b, v, 0)     # 14
-print (sort (a, b) -> a < b, v)          # [1.0, 1.0, 3.0, 4.0, 5.0]
+print (sort (a, b) -> a < b, v)          # [1, 1, 3, 4, 5]
 ```
 
 ### Matrix manipulation (`std.matrix`)
@@ -1164,11 +1161,11 @@ import std.matrix.{transpose, multiply, add, subtract, elementwise}
 var a = [[1, 2], [3, 4]]
 var b = [[5, 6], [7, 8]]
 
-print transpose a                        # [[1.0, 3.0], [2.0, 4.0]]
-print multiply a, b                      # [[19.0, 22.0], [43.0, 50.0]]
-print add a, b                           # [[6.0, 8.0], [10.0, 12.0]]
-print subtract a, b                      # [[-4.0, -4.0], [-4.0, -4.0]]
-print elementwise (x, y) -> x * y, a, b  # [[5.0, 12.0], [21.0, 32.0]]
+print transpose a                        # [[1, 3], [2, 4]]
+print multiply a, b                      # [[19, 22], [43, 50]]
+print add a, b                           # [[6, 8], [10, 12]]
+print subtract a, b                      # [[-4, -4], [-4, -4]]
+print elementwise (x, y) -> x * y, a, b  # [[5, 12], [21, 32]]
 ```
 
 Everything else commonly found in a language's standard library — string

@@ -53,10 +53,8 @@ std::string typeName(const Value& v);
 // Human-readable rendering of a value for the `print`/`concat` natives
 // (Phase 7) -- matches `poc/src/interpreter.py`'s `stringify` (numbers
 // drop a trailing ".0", strings are unquoted, booleans render lowercase).
-// A vector's own elements are rendered slightly differently when nested
-// this way -- see `value.cpp`'s `reprString` -- mirroring how `poc`'s
-// vectors, being plain Python lists, print each element with `repr()`
-// rather than this same `stringify`.
+// A vector prints as `[e1, e2, ...]` with each element rendered by this
+// same function, so `[1, "a"]` prints as `[1, a]`.
 std::string stringify(const Value& v);
 
 }  // namespace iqalox

@@ -43,16 +43,14 @@ TEST_CASE("stringify: a string prints unquoted", "[value]") {
     REQUIRE(stringify(objValue(s)) == "hello");
 }
 
-TEST_CASE("stringify: a vector's own elements use repr rules, not stringify's", "[value]") {
+TEST_CASE("stringify: a vector's elements print exactly as they do on their own", "[value]") {
     Vm vm;
     auto* vec = vm.allocate<ObjVector>();
     vec->elements = {numberValue(1.0), numberValue(2.5), objValue(vm.allocate<ObjString>("a"))};
 
-    // Nested numbers keep their ".0" and nested strings are quoted, unlike
-    // a bare top-level `stringify(1.0)` == "1" or `stringify("a")` == "a"
-    // -- matching poc's vectors being plain Python lists, whose `str()`
-    // renders each element with `repr()`, not `stringify()`.
-    REQUIRE(stringify(objValue(vec)) == "[1.0, 2.5, 'a']");
+    // Same rules as a bare top-level value: no ".0" on whole numbers, no
+    // quotes on strings.
+    REQUIRE(stringify(objValue(vec)) == "[1, 2.5, a]");
 }
 
 TEST_CASE("stringify: nested vectors recurse", "[value]") {
@@ -64,15 +62,7 @@ TEST_CASE("stringify: nested vectors recurse", "[value]") {
     auto* outer = vm.allocate<ObjVector>();
     outer->elements = {objValue(inner1), objValue(inner2)};
 
-    REQUIRE(stringify(objValue(outer)) == "[[1.0, 2.0], [3.0, 4.0]]");
-}
-
-TEST_CASE("stringify: a nested string containing a single quote reprs with double quotes", "[value]") {
-    Vm vm;
-    auto* vec = vm.allocate<ObjVector>();
-    vec->elements = {objValue(vm.allocate<ObjString>("it's"))};
-
-    REQUIRE(stringify(objValue(vec)) == "[\"it's\"]");
+    REQUIRE(stringify(objValue(outer)) == "[[1, 2], [3, 4]]");
 }
 
 TEST_CASE("typeName reports a sensible name for each kind of value", "[value]") {

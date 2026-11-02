@@ -896,6 +896,14 @@ running all 16 examples through `iqaloxc run`, and an end-to-end check of a
 self-contained single-file `iqaloxc` + `iqaloxvm` + launcher laid out like
 the bundle, run from another directory.
 
+*Review follow-up (PR #46):* verifying `LANGUAGE.md` against the real
+toolchain surfaced that a printed vector formatted its elements in Python's
+`repr` style (`[1.0, 'a']`), inherited from `poc`'s plain-list printing and
+contradicting the "no trailing `.0`" rule. The repository owner ruled it
+unintended; fixed for `0.3.0`: each element is stringified exactly like a
+top-level `print` (`[1, a]`). Changed `vm/src/value.cpp` (the `repr` helpers
+were deleted), its Catch2 tests, and `LANGUAGE.md`.
+
 ## 6. Testing strategy
 
 Same split `0.1`/`0.2` established: xUnit (`compiler/tests/`) for scanner/
