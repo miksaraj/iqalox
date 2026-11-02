@@ -1,16 +1,15 @@
-# The Iqalox Language (0.3, in progress)
+# The Iqalox Language (0.3)
 
 > **Older versions** (`0.1-poc`, `0.1`, `0.2`) are preserved by git tags
 > rather than as separate files — see
 > [`docs/EARLIER-VERSIONS.md`](EARLIER-VERSIONS.md) for which tag holds
 > each one's reference (this document as it stood at the `0.2` release is
 > `git show 0.2.0:docs/LANGUAGE.md`). This file describes the current,
-> actively-maintained version, and marks what is **new for `0.3`** on top
-> of `0.2`'s language as it goes.
+> current version, and marks what is **new for `0.3`** on top of `0.2`'s
+> language. (At the `0.3` release it is `git show 0.3.0:docs/LANGUAGE.md`.)
 
-This is the complete reference for Iqalox as implemented so far — `0.2`'s
-language plus the `0.3` features that have landed (each marked "new for
-`0.3`") — a
+This is the complete reference for Iqalox `0.3` — `0.2`'s language plus
+the `0.3` additions (each marked "new for `0.3`") — implemented as a
 compiler frontend (`compiler/`, F#) that compiles `.iqx` source to a
 bytecode file, executed by a stack-based virtual machine (`vm/`, C++23).
 It documents what the language **actually does today**, with runnable
@@ -27,8 +26,14 @@ log, and `docs/PLAN-0.1.md`/`docs/PLAN-0.1-POC.md` for the earlier
 versions' logs.
 
 Every code sample below is valid Iqalox and, unless marked otherwise,
-compiles and runs successfully via `compiler/src/Iqaloxc.fsproj` (or
-`iqaloxc`, once built) piped into `vm/build/iqaloxvm`. Longer, complete
+compiles and runs successfully. In a release bundle, run a program in one
+step with `iqalox program.iqx` (the launcher for `iqaloxc run program.iqx`,
+which compiles to a temporary bytecode file and runs `iqaloxvm` on it; the
+exit status is the VM's). The two-step form — `iqaloxc program.iqx out.iqbc`,
+then `iqaloxvm out.iqbc` — remains available. `iqaloxc` also runs a small
+optimizer (constant folding, propagation of never-assigned top-level
+`var`s with literal initializers, dead-code removal) that never changes a
+program's behavior; `--no-optimize` turns it off. Longer, complete
 programs live under `langspec/examples/*.iqx` — this version's
 active-target fixture set (see `langspec/README.md`).
 **Since `0.3` the standard library must be imported** ([§13](#13-the-standard-library)):
@@ -67,12 +72,15 @@ isn't a goal.
 
 Iqalox is Lox — the small teaching language from Bob Nystrom's *Crafting
 Interpreters* — mutated and extended by the repository owner into a
-personal language project. `0.2` builds directly on `0.1`'s compiler
-frontend plus bytecode virtual machine (see `ROADMAP.md`'s architecture
-note), adding real vector manipulation and a first, deliberately-scoped
-pass at multiple-inheritance-style class composition.
+personal language project. `0.3` builds directly on `0.2` (and `0.1`'s
+compiler frontend plus bytecode virtual machine; see `ROADMAP.md`'s
+architecture note): `0.2` added real vector manipulation and a first,
+deliberately-scoped pass at multiple-inheritance-style class composition;
+`0.3` adds multi-file programs with `import`, an import-gated standard
+library, slices and negative indices, richer list comprehensions,
+unused-variable warnings, and a first set of compiler optimizations.
 
-Classifying `0.2` along the axes commonly used to describe programming
+Classifying `0.3` along the axes commonly used to describe programming
 languages — all statements below describe this implementation as it
 exists today, not a permanent commitment for later Iqalox versions:
 
@@ -214,9 +222,10 @@ DIGIT       → '0'...'9'
 ```
 
 - **Numbers** are always floating-point — there is no separate integer
-  type (`5` and `5.0` are the same value). Printing drops a trailing
-  `.0`, so `print 5` prints `5`, not `5.0` (see
-  [§13](#13-the-standard-library)).
+  type (`5` and `5.0` are the same value). Printing drops a trailing `.0`, so `print 5` prints `5`, not `5.0` (see
+  [§13](#13-the-standard-library)). The same rule applies to each element
+  of a printed vector: `print [1, "a"]` prints `[1, a]` (no `.0`, strings
+  unquoted).
 - **Strings** may use single or double quotes interchangeably. Escape
   sequences are processed inside string literals — `\n` `\t` `\r` `\\`
   `\'` `\"` `\0` are recognized; any other character after a backslash is
@@ -228,13 +237,13 @@ DIGIT       → '0'...'9'
   comment-only line) becomes a harmless empty statement, not an error.
   The scanner turns *every* newline into an implicit `;` unconditionally,
   with no awareness of bracket/paren depth — see
-  [§15](#15-known-limitations) item 9 for the resulting limitation on
+  [§15](#15-known-limitations) item 8 for the resulting limitation on
   multi-line vector literals and grouping expressions.
 - **Keywords** (cannot be used as identifiers): `and`, `class`, `false`,
   `fun`, `for`, `nil`, `or`, `return`, `super`, `self`, `true`, `var`,
-  `extends`, `break`, `continue`, `mut`, `pub`, `with`, `trait`, `use`.
-  (`module` is still reserved for future module support but has no
-  grammar or meaning yet.) `print` and `concat`, and the whole
+  `extends`, `break`, `continue`, `mut`, `pub`, `with`, `trait`, `use`,
+  `import`, `as`. (`module` is also reserved, but has no grammar or
+  meaning: a file's module name comes from its path, [§17](#17-modules-and-imports-new-for-03).) `print` and `concat`, and the whole
   array/matrix standard library (`push`, `pop`, `length`, `reverse`,
   `map`, `filter`, `reduce`, `sort`, `transpose`, `multiply`, `add`,
   `subtract`, `elementwise`), are **not** keywords — see
@@ -697,7 +706,7 @@ loops, the first-written generator outermost), and optionally follow the
 generator list with a **second** `|` and a guard expression:
 
 ```
-print [[x, y] | x <- [1, 2], y <- ["a", "b"]]   # [[1, 'a'], [1, 'b'], [2, 'a'], [2, 'b']]
+print [[x, y] | x <- [1, 2], y <- ["a", "b"]]   # [[1, a], [1, b], [2, a], [2, b]]
 print [n | n <- [1, 2, 3, 4, 5, 6] | n % 2 == 0] # [2, 4, 6]
 ```
 
@@ -828,7 +837,7 @@ just `method(...) { ... }` (private, the default):
 class Vault {
     var contents mut
 
-    init() { self.contents = 0 }
+    init() { self.contents = 0; }
 
     checkPin(pin) { return pin == 1234; }   # private -- self-only
 
@@ -1066,7 +1075,8 @@ The modules:
 
 - **`print value`** — stringifies `value` (see [§3](#3-values-and-types)'s
   stringification rules: `nil` → `nil`, floats drop a trailing `.0`,
-  booleans lowercase) and writes it followed by a newline. Returns `nil`.
+  booleans lowercase; a vector prints as `[e1, e2, ...]` with each element
+  stringified the same way) and writes it followed by a newline. Returns `nil`.
   Always available, no import needed.
 
 ### Array manipulation (`std.vector`)
@@ -1203,7 +1213,7 @@ recover from either kind:
 **Remaining, smaller gap versus `0.1-poc`**: `0.1-poc` additionally shows
 *which token* triggered the error (`Error at 'x': ...`) plus a caret-
 underlined source excerpt, for both compile-time and runtime errors.
-`0.2` has real line numbers for both, but not yet the token text or
+`0.3` has real line numbers for both, but not yet the token text or
 source excerpt — the VM in particular has no access to the original
 source text at all (it only ever receives a compiled `.iqbc` file), so
 reproducing `0.1-poc`'s excerpt there would need embedding source text in
@@ -1321,7 +1331,7 @@ for the full history of how each was arrived at.
 7. **No token text or source excerpt on errors, unlike `0.1-poc`.**
    `0.1-poc` reports both compile-time and runtime errors as `[line N]
    Error at 'x': message` plus a caret-underlined single-line source
-   excerpt. `0.2` reports a real `[line N]` for every error kind
+   excerpt. `0.3` reports a real `[line N]` for every error kind
    (including runtime errors, via a per-instruction-byte line table in
    the bytecode format itself), but not yet the offending token's text or
    a source excerpt. The excerpt/token-text part remains open, and for
@@ -1419,7 +1429,7 @@ level of a file is a compile error.
 ```
 # math/vector.iqx
 var offset = 100                    # private to this file
-fun shifted(n) { return n + offset }  # private
+fun shifted(n) { return n + offset; }  # private
 
 pub fun double(n) {                 # importable
     return shifted(n) - offset + n

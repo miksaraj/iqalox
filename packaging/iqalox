@@ -1,0 +1,5 @@
+#!/bin/sh
+# One-command runner shipped in the release bundle: `iqalox program.iqx`
+# compiles and runs in one step (iqaloxc and iqaloxvm sit next to this file).
+dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec "$dir/iqaloxc" run "$@"

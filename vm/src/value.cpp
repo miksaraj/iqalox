@@ -135,38 +135,6 @@ std::string formatNumber(double v) {
     return out;
 }
 
-bool looksLikeWholeNumber(const std::string& formatted) {
-    return formatted.find_first_of(".en") == std::string::npos;
-}
-
-// Python's `repr(str)`: single-quoted, switching to double quotes if the
-// string contains a `'` but no `"`. Doesn't attempt full parity with
-// Python's escaping of control characters etc. -- this only matters for
-// an element nested inside a printed vector, a minor corner of the
-// format not worth chasing every last case of.
-std::string quotedString(const std::string& s) {
-    bool hasSingle = s.find('\'') != std::string::npos;
-    bool hasDouble = s.find('"') != std::string::npos;
-    char quote = (hasSingle && !hasDouble) ? '"' : '\'';
-
-    std::string out;
-    out.push_back(quote);
-    for (char c : s) {
-        if (c == quote || c == '\\') out.push_back('\\');
-        out.push_back(c);
-    }
-    out.push_back(quote);
-    return out;
-}
-
-// The form an element takes *nested inside a printed vector* -- distinct
-// from `stringify`'s own top-level form. `poc`'s vectors are plain Python
-// lists, so `str(a_vector)` is Python's own `list.__str__`, which renders
-// each element with `repr()`, not `stringify()`: a nested number keeps
-// its trailing ".0" and a nested string is quoted, even though neither
-// happens for a bare top-level `print(1.0)` or `print("hi")`.
-std::string reprString(const Value& v);
-
 }  // namespace
 
 std::string stringify(const Value& v) {
@@ -183,7 +151,7 @@ std::string stringify(const Value& v) {
             std::string out = "[";
             for (size_t i = 0; i < elements.size(); ++i) {
                 if (i > 0) out += ", ";
-                out += reprString(elements[i]);
+                out += stringify(elements[i]);
             }
             out += "]";
             return out;
@@ -205,23 +173,5 @@ std::string stringify(const Value& v) {
     }
     return "<value>";
 }
-
-namespace {
-
-std::string reprString(const Value& v) {
-    if (isNumber(v)) {
-        std::string formatted = formatNumber(asNumber(v));
-        if (looksLikeWholeNumber(formatted)) formatted += ".0";
-        return formatted;
-    }
-    if (isObj(v) && asObj(v)->type == ObjType::String) {
-        return quotedString(static_cast<ObjString*>(asObj(v))->value);
-    }
-    // nil/undef/bool/vector/function all print identically whether nested
-    // or not.
-    return stringify(v);
-}
-
-}  // namespace
 
 }  // namespace iqalox

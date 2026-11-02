@@ -156,7 +156,7 @@ and phased sequencing:
 `0.2`'s language reference is `docs/LANGUAGE.md` at tag `0.2.0`
 (`docs/EARLIER-VERSIONS.md`); the current `docs/LANGUAGE.md` has moved on to `0.3`.
 
-### 0.3 *(formerly `0.2`)* — *active target*
+### 0.3 *(formerly `0.2`)* — *done*
 
 See `docs/PLAN-0.3.md` for the full plan — design decisions, open
 questions, and phased sequencing:
@@ -207,7 +207,7 @@ examples (it's `0.1-poc`'s original design, `poc/src/parser.py`'s
 leave as-is permanently, not revisited here or in any later version; see
 `docs/PLAN-0.2.md`'s Phase 5 entry for the full exchange.
 
-### 0.4 *(formerly `0.3`)*
+### 0.4 *(formerly `0.3`)* — *active target*
 
 Two language-level models first, then standard library part 1 of 5 (see
 "Standard library vision" below for the full category breakdown and how it
