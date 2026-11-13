@@ -215,31 +215,50 @@ maps onto `0.4`-`0.8`). The two models are here, not later, because the
 math and string libraries below are built directly on them and because
 `1.0` is the stability line (see "1.0") — anything that changes what an
 existing program means has to ship before it. Both were decided with the
-repository owner while planning the `1.0`/`1.X` entries.
+repository owner while planning the `1.0`/`1.X` entries. See
+`docs/PLAN-0.4.md` for the full plan: design decisions, open questions, and
+phased sequencing.
 
 - **Numeric model: a separate, exact, arbitrary-precision integer type.**
   `0.1`-`0.3` have IEEE doubles only (exact up to 2^53, no integer
   division, no bitwise operators). `0.4` adds integers as their own type,
   distinct from floats, with integer division (`//`) and bitwise operators
   that apply to integers. Deliberately a breaking change, made now rather
-  than later because of the stability line. Details to be settled and asked
-  about when `0.4` planning starts, not decided here: how integer vs. float
-  literals are told apart, what `/` does on two integers, mixed
-  integer/float arithmetic and equality (`1 == 1.0`), printing, and how
-  vector indices and `length` fit in.
+  than later because of the stability line. **Details resolved in
+  `docs/PLAN-0.4.md` §1** (decisions 1-12):
+  - a decimal point (or an exponent) makes a float; hex, binary and octal
+    literals and `_` separators are added;
+  - `/` always gives a float, and `//` is floor division on integers only;
+  - mixed arithmetic and ordering promote to float, but `1 == 1.0` is
+    **false**;
+  - floats always print with a decimal point;
+  - indices must be integers;
+  - bitwise operators are `& | ~ << >>` with Python-like precedence;
+  - **division by an integer zero is a compile-time error** unless the
+    divisor is proven or guarded non-zero, while a float zero divisor
+    follows IEEE.
 - **String model: strings are sequences of Unicode code points.** `s[i]`
   is a one-character string (there is no separate `char` type), `length`
   counts code points, and the string library below reports positions in the
   same unit; `ord`/`chr`-style helpers convert between a character and its
   code. This is the "character-level string access" a self-hosted compiler
   needs (see "1.0"); it lands here so that search/split/regex and indexing
-  agree from the start.
+  agree from the start. Resolved in `docs/PLAN-0.4.md` decisions 13-21:
+  - strings are immutable;
+  - they get vector-style negative indices and slices;
+  - they iterate in comprehensions and spread;
+  - they compare lexicographically by code point;
+  - literals gain `\u{...}` escapes and `r"..."` raw strings;
+  - `upper`/`lower` use full Unicode case mapping via ICU, a new `vm/`
+    dependency.
 - String manipulation standard library — concatenation, search, split,
-  format, regex
+  format, regex — as `std.string` plus a separate `std.regex` (ICU
+  syntax). `+` still doesn't concatenate strings (`concat`/`join` do).
 - Mathematical operations standard library — arithmetic, trigonometry,
   logarithms, random number generation, rounding (`floor`/`round` return
-  integers)
-- Second set of compiler optimizations
+  integers) — as `std.math`
+- Second set of compiler optimizations — loop-invariant code motion and
+  strength reduction
 
 ### 0.5 *(formerly `0.4`)*
 
