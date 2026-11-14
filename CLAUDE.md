@@ -30,7 +30,7 @@ Implementation-agnostic material stays at the repository root:
 
 - `langspec/` — the language specification: syntax grammar and runnable
   examples, for whichever version is the **current active target** (right
-  now, `0.3` — see `docs/PLAN-0.3.md`). "Active target" can run ahead of
+  now, `0.4` — see `docs/PLAN-0.4.md`). "Active target" can run ahead of
   what's actually implemented in `compiler/`+`vm/` during a version's
   phased rollout; check that version's `docs/PLAN-0.X.md` §4 feature
   checklist for what has actually landed. `langspec/README.md` explains
@@ -47,7 +47,7 @@ Implementation-agnostic material stays at the repository root:
 - `ROADMAP.md` — the version roadmap (0.1-poc onward).
 - `docs/` — implementation planning docs (`docs/PLAN-0.1-POC.md` for
   `0.1-poc`, `docs/PLAN-0.1.md` for `0.1`, `docs/PLAN-0.2.md` for `0.2`,
-  `docs/PLAN-0.3.md` for `0.3`), plus
+  `docs/PLAN-0.3.md` for `0.3`, `docs/PLAN-0.4.md` for `0.4`), plus
   `docs/LANGUAGE.md`, the language reference for the current version (it
   marks what is new in `0.3`). Older references (`0.1-poc`, `0.1`, `0.2`)
   are not kept as separate files; `docs/EARLIER-VERSIONS.md` says which tag
@@ -415,6 +415,29 @@ is now `Stdlib.fs`, a set of built-in `std.*` modules (`std.vector`,
 `std.matrix`) a program must `import`; `print` is the only ambient name; every
 module (the entry file too) has its globals qualified (`main::x`) so a user's
 own `sort`/`push` can never clobber a native in the VM's flat global table.
+
+## Architecture (`compiler/` + `vm/`, 0.4)
+
+**Planned, no phases landed yet.** See `docs/PLAN-0.4.md`. Its §1 records 29
+design decisions the repository owner settled before any code. **Treat them as
+decided; don't re-open them.** The handful still pending are listed in §2 and
+are to be asked when their phase starts. In outline:
+
+- **Numbers**: an exact arbitrary-precision integer type next to floats.
+  - `/` always gives a float, and `//` is floor division on integers.
+  - `1 == 1.0` is false, though mixed arithmetic and ordering promote to
+    float.
+  - Floats always print with a decimal point.
+  - Bitwise operators are `& | ~ << >>`.
+  - Division by an integer zero is a **compile-time** error unless the
+    divisor is proven or guarded non-zero.
+- **Strings**: immutable sequences of code points.
+- **Libraries**: `std.math`, `std.string` and `std.regex`.
+- **Optimizations**: loop-invariant code motion and strength reduction.
+
+`vm/` gains its first heavyweight third-party dependency, **ICU** (case
+mapping, character properties, regex), plus a vendored mini-gmp for big
+integers. Bytecode moves to format v4.
 
 ## Engineering conventions
 

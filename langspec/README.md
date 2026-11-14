@@ -17,11 +17,11 @@ langspec/
 └── versions/0.1/examples/  the 0.1 examples, kept only because CI reads them (see below)
 ```
 
-- **Everything here is the current active target** — right now, `0.3`
-  (`../docs/PLAN-0.3.md`). "Active target" means this is what the language is being
+- **Everything here is the current active target** — right now, `0.4`
+  (`../docs/PLAN-0.4.md`). "Active target" means this is what the language is being
   designed and built *towards*, not necessarily what's fully implemented yet:
-  `compiler/`+`vm/` land `0.3`'s features incrementally across several phases, and
-  `../docs/PLAN-0.3.md` §4's feature checklist tracks exactly what's landed so far.
+  `compiler/`+`vm/` land `0.4`'s features incrementally across several phases, and
+  `../docs/PLAN-0.4.md` §4's feature checklist tracks exactly what's landed so far.
   Until every phase lands, the top-level `examples/` may describe the target spec and
   not yet run against `compiler/`+`vm/` — see `../CLAUDE.md`'s "Example scripts"
   convention for how this is tracked during the transition.
@@ -45,8 +45,9 @@ langspec/
 
 - **"What does Iqalox do today?"** → `../docs/LANGUAGE.md` (the full prose reference,
   with what is new in `0.3` marked); the terser grammar-level equivalent is this
-  directory's `SYNTAX_GRAMMAR.md` and `examples/`. Note the grammar and examples describe
-  `0.3`, the *target*, and may be a little ahead of what has shipped.
-- **"What's being planned/built right now?"** → `../docs/PLAN-0.3.md` for the design
-  decisions, open questions, and implementation status behind `0.3`.
+  directory's `SYNTAX_GRAMMAR.md` and `examples/`. While `0.4` is being phased in, these
+  still describe `0.3` except where a landed `0.4` phase has already updated them for
+  its own feature (see `../docs/PLAN-0.4.md` §4–§5).
+- **"What's being planned/built right now?"** → `../docs/PLAN-0.4.md` for the design
+  decisions, open questions, and implementation status behind `0.4`.
 - **"What did an earlier version look like?"** → `../docs/EARLIER-VERSIONS.md`.
