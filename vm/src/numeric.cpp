@@ -4,6 +4,7 @@
 #include <charconv>
 #include <cmath>
 #include <cstdlib>
+#include <iterator>
 #include <limits>
 
 #include "object.hpp"
@@ -356,7 +357,7 @@ std::string formatFloat(double v) {
     if (std::isinf(v)) return v < 0 ? "-inf" : "inf";
 
     char buf[64];
-    auto result = std::to_chars(buf, buf + sizeof(buf), v, std::chars_format::scientific);
+    auto result = std::to_chars(buf, buf + std::size(buf), v, std::chars_format::scientific);
     std::string sci(buf, result.ptr);
 
     size_t ePos = sci.find('e');
