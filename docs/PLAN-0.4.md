@@ -485,8 +485,10 @@ first because nearly everything later depends on it (indices, `length`,
 `std.math`, constant folding). The new ICU dependency is de-risked in its
 own phase before any feature relies on it.
 
-**Phase 0 — Dependency plumbing — done on Linux; macOS and Windows
-pending their first CI run.** No language change.
+**Phase 0 — Dependency plumbing — done.** No language change. Verified
+on Linux, macOS (Apple clang, libc++) and Windows (MSVC) by CI on PR #48:
+the full VM suite passes on all three, and the release-configured binary
+passes the smoke test on all three.
 
 *mini-gmp* is vendored unmodified from GMP 6.3.0 in
 `vm/third_party/mini-gmp/`. `README.iqalox.md` there records the file
@@ -538,19 +540,20 @@ mini-gmp upgrade can't change behaviour silently.
 way to prove the libraries are linked into the shipped binary itself, not
 only into the test suite.
 
-Measured on Linux:
+Measured on Linux unless noted:
 
 | Measurement | Result |
 |---|---|
-| ICU build time (8 jobs) | ~25 s |
-| Release `iqaloxvm` size | 192 KB → 479 KB (only `--version` uses ICU so far) |
+| ICU build time (8 jobs) | ~25 s; a whole CI `vm/` job takes 1-4 min |
+| Release `iqaloxvm` size | 192 KB → 479 KB (only `--version` uses ICU so far); 448 KiB on macOS, 704 KiB on Windows |
 | Stripped binary using regex + case mapping + character properties | ~1.4 MB, the realistic size once Phases 6-7 land |
 | ICU data file the stub approach avoids | 32 MB |
 
 Verified:
 - every `langspec/examples/*.iqx` gives byte-identical output and exit
   codes on `main`'s VM and on the new Debug and Release VMs;
-- the full Catch2 suite passes under GCC 13 and Clang 18;
+- the full Catch2 suite passes under GCC 13 and Clang 18 locally, and in
+  CI on all three platforms;
 - a clean configure downloads and verifies the tarball.
 
 Build, CI and release changes:
@@ -678,14 +681,11 @@ On top of that, this version needs:
 
 - **ICU is the first heavyweight third-party dependency.** It has to build
   and link on Linux, macOS and Windows, in CI and in `release.yml`.
-  *Phase 0 update:* the data-size half of this risk is gone (no data file
-  is linked, about +1.4 MB in total), and Linux is proven. macOS (Apple
-  clang, libc++) and Windows (MSVC) have only been reasoned about, not
-  built; ICU's sources aren't routinely compiled by plain CMake on MSVC,
-  so that is where trouble is likeliest. If static linking proves
-  impractical on a platform, raise it with the owner as a direct question
-  laying out the real cost, the way `0.2` Phase 8's C3 scope check was
-  raised, rather than quietly shipping a much bigger bundle.
+  *Retired by Phase 0:* no data file is linked (about +1.4 MB in total),
+  and static linking works on Linux, macOS and Windows, proven by CI on
+  every PR from now on. What remains is upgrade risk. A future ICU
+  version may need its CMake flags adjusting; `test_dependencies.cpp`
+  is there to catch behaviour changes.
 - **ICU's source tarball is fetched from the Ubuntu archive.** That is the
   copy reachable from the environment Phase 0 was built in; GitHub
   release downloads were blocked there. The pinned hash makes the host
