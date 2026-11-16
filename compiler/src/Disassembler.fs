@@ -12,7 +12,12 @@ open Iqalox.Bytecode
 
 let private describeConstant (constant: Constant) : string =
     match constant with
-    | NumberConstant n -> string n
+    | IntConstant n -> string n
+    // Always with a decimal point, so a float constant is never mistaken
+    // for an int one.
+    | FloatConstant n ->
+        let text = n.ToString("R", System.Globalization.CultureInfo.InvariantCulture)
+        if System.Double.IsFinite n && not (text.Contains '.' || text.Contains 'E') then text + ".0" else text
     | StringConstant s -> $"\"{s}\""
     | FunctionConstant proto -> $"<fun {proto.Name}>"
 

@@ -47,26 +47,32 @@ std::pair<size_t, size_t> checkMatrixShape(const std::string& fnName, const std:
     return {rows.size(), cols};
 }
 
-double matrixElement(const std::string& fnName, const Value& m, size_t i, size_t j) {
+Value matrixElement(const std::string& fnName, const Value& m, size_t i, size_t j) {
     const Value& element = vectorElements(vectorElements(m)[i])[j];
-    if (!isNumber(element)) {
+    if (!numeric::isNumber(element)) {
         throw RuntimeError(fnName + "'s matrix elements must be numbers, got " + typeName(element) + ".");
     }
-    return asNumber(element);
+    return element;
 }
 
-ObjVector* buildMatrix(Vm& vm, size_t rows, size_t cols, const std::function<double(size_t, size_t)>& at) {
-    auto* result = vm.allocate<ObjVector>();
-    result->elements.reserve(rows);
+// Builds a rows x cols matrix from `at(i, j)`, which may itself allocate
+// (exact integer arithmetic can produce a heap ObjBigInt). The result is
+// kept rooted, and each row is attached to it before being filled, so a
+// collection `at` triggers can't free what has been built so far.
+Value buildMatrix(Vm& vm, size_t rows, size_t cols, const std::function<Value(size_t, size_t)>& at) {
+    Vm::TempRoot result(vm, objValue(vm.allocate<ObjVector>()));
+    auto& resultRows = static_cast<ObjVector*>(asObj(result.get()))->elements;
+    resultRows.reserve(rows);
     for (size_t i = 0; i < rows; ++i) {
         auto* row = vm.allocate<ObjVector>();
+        resultRows.push_back(objValue(row));
         row->elements.reserve(cols);
         for (size_t j = 0; j < cols; ++j) {
-            row->elements.push_back(numberValue(at(i, j)));
+            Value element = at(i, j);
+            row->elements.push_back(element);
         }
-        result->elements.push_back(objValue(row));
     }
-    return result;
+    return result.get();
 }
 
 }  // namespace
@@ -113,7 +119,7 @@ Value nativeLength(Vm&, const std::vector<Value>& args) {
     if (!isObj(args[0]) || asObj(args[0])->type != ObjType::Vector) {
         throw RuntimeError("Only vectors have a length, got " + typeName(args[0]) + ".");
     }
-    return numberValue(static_cast<double>(static_cast<ObjVector*>(asObj(args[0]))->elements.size()));
+    return smallIntValue(static_cast<int64_t>(static_cast<ObjVector*>(asObj(args[0]))->elements.size()));
 }
 
 Value nativeReverse(Vm& vm, const std::vector<Value>& args) {
@@ -131,8 +137,7 @@ Value nativeTranspose(Vm& vm, const std::vector<Value>& args) {
     // An MxN matrix's transpose is NxM -- structurally never in-place,
     // since the result's own shape differs from the input's whenever the
     // matrix isn't square.
-    return objValue(buildMatrix(vm, cols, rows,
-                                 [&](size_t i, size_t j) { return matrixElement("transpose", args[0], j, i); }));
+    return buildMatrix(vm, cols, rows, [&](size_t i, size_t j) { return matrixElement("transpose", args[0], j, i); });
 }
 
 Value nativeMultiply(Vm& vm, const std::vector<Value>& args) {
@@ -144,13 +149,17 @@ Value nativeMultiply(Vm& vm, const std::vector<Value>& args) {
                             std::to_string(bCols) + " matrix -- the first matrix's column count must equal the " +
                             "second's row count.");
     }
-    return objValue(buildMatrix(vm, aRows, bCols, [&](size_t i, size_t j) {
-        double sum = 0.0;
+    return buildMatrix(vm, aRows, bCols, [&](size_t i, size_t j) {
+        // Exact for integer matrices (docs/PLAN-0.4.md Phase 1). The running
+        // sum is rooted: computing the next product may allocate.
+        Vm::TempRoot sum(vm, smallIntValue(0));
         for (size_t k = 0; k < aCols; ++k) {
-            sum += matrixElement("multiply", args[0], i, k) * matrixElement("multiply", args[1], k, j);
+            Value product = numeric::multiply(vm, matrixElement("multiply", args[0], i, k),
+                                              matrixElement("multiply", args[1], k, j));
+            sum.set(numeric::add(vm, sum.get(), product));
         }
-        return sum;
-    }));
+        return sum.get();
+    });
 }
 
 Value nativeAdd(Vm& vm, const std::vector<Value>& args) {
@@ -161,9 +170,9 @@ Value nativeAdd(Vm& vm, const std::vector<Value>& args) {
                             std::to_string(aCols) + " and " + std::to_string(bRows) + "x" + std::to_string(bCols) +
                             ".");
     }
-    return objValue(buildMatrix(vm, aRows, aCols, [&](size_t i, size_t j) {
-        return matrixElement("add", args[0], i, j) + matrixElement("add", args[1], i, j);
-    }));
+    return buildMatrix(vm, aRows, aCols, [&](size_t i, size_t j) {
+        return numeric::add(vm, matrixElement("add", args[0], i, j), matrixElement("add", args[1], i, j));
+    });
 }
 
 Value nativeSubtract(Vm& vm, const std::vector<Value>& args) {
@@ -174,9 +183,9 @@ Value nativeSubtract(Vm& vm, const std::vector<Value>& args) {
                             std::to_string(aCols) + " and " + std::to_string(bRows) + "x" + std::to_string(bCols) +
                             ".");
     }
-    return objValue(buildMatrix(vm, aRows, aCols, [&](size_t i, size_t j) {
-        return matrixElement("subtract", args[0], i, j) - matrixElement("subtract", args[1], i, j);
-    }));
+    return buildMatrix(vm, aRows, aCols, [&](size_t i, size_t j) {
+        return numeric::subtract(vm, matrixElement("subtract", args[0], i, j), matrixElement("subtract", args[1], i, j));
+    });
 }
 
 }  // namespace iqalox

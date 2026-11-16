@@ -22,18 +22,6 @@ std::string displayGlobalName(const std::string& qualified) {
 constexpr size_t kMaxFrames = 1024;
 constexpr size_t kGcHeapGrowFactor = 2;
 
-// Python's `%`/`**` (poc/src/interpreter.py's PERCENT/POWER handling,
-// which `0.1` matches rather than diverging from) floor toward the
-// divisor's sign, unlike C++'s `std::fmod`, which floors toward the
-// dividend's -- e.g. `-1 % 4` is `3` in Python/poc, but `std::fmod(-1, 4)`
-// is `-1`. Adjust by one divisor's worth when the signs disagree.
-double pythonStyleModulo(double a, double b) {
-    double result = std::fmod(a, b);
-    if (result != 0.0 && ((result < 0.0) != (b < 0.0))) {
-        result += b;
-    }
-    return result;
-}
 
 }  // namespace
 
@@ -138,29 +126,20 @@ void Vm::checkPropertyNotUndef(const Value& value, const std::string& propName) 
     runtimeError("Property '" + propName + "' accessed before being assigned a value.");
 }
 
-void Vm::checkNumberOperand(const Value& value, const char* message) {
-    if (!isNumber(value)) runtimeError(message);
-}
-
-void Vm::checkNumberOperands(const Value& a, const Value& b, const char* message) {
-    if (!isNumber(a) || !isNumber(b)) runtimeError(message);
-}
-
 size_t Vm::checkVectorIndex(const Value& receiver, const Value& indexValue) {
     if (!isObj(receiver) || asObj(receiver)->type != ObjType::Vector) {
         runtimeError("Only vectors can be indexed, got " + typeName(receiver) + ".");
     }
-    if (!isNumber(indexValue)) {
-        runtimeError("Vector index must be a number, got " + typeName(indexValue) + ".");
-    }
-    double indexNum = asNumber(indexValue);
-    if (std::floor(indexNum) != indexNum) {
-        runtimeError("Vector index must be an integer, got " + stringify(indexValue) + ".");
+    // docs/PLAN-0.4.md decision 9: only an integer indexes, even a whole
+    // float like `1.0` is refused.
+    numeric::Index index = numeric::toIndex(indexValue);
+    if (!index.isInteger) {
+        runtimeError("Vector index must be an integer, got " + typeName(indexValue) + ".");
     }
     auto* vector = static_cast<ObjVector*>(asObj(receiver));
-    double length = static_cast<double>(vector->elements.size());
-    double resolved = indexNum < 0.0 ? indexNum + length : indexNum;
-    if (resolved < 0.0 || resolved >= length) {
+    auto length = static_cast<int64_t>(vector->elements.size());
+    int64_t resolved = index.value < 0 ? index.value + length : index.value;
+    if (resolved < 0 || resolved >= length) {
         runtimeError("Vector index " + stringify(indexValue) + " out of range for vector of length " +
                       std::to_string(vector->elements.size()) + ".");
     }
@@ -172,25 +151,22 @@ Value Vm::getSlice(const Value& receiver, const Value& startValue, const Value& 
         runtimeError("Only vectors can be sliced, got " + typeName(receiver) + ".");
     }
     auto* vector = static_cast<ObjVector*>(asObj(receiver));
-    double length = static_cast<double>(vector->elements.size());
+    auto length = static_cast<int64_t>(vector->elements.size());
 
-    auto resolveBound = [&](const Value& boundValue, double defaultValue, const char* label) {
+    auto resolveBound = [&](const Value& boundValue, int64_t defaultValue, const char* label) {
         if (isNil(boundValue)) return defaultValue;
-        if (!isNumber(boundValue)) {
-            runtimeError(std::string("Slice ") + label + " bound must be a number, got " + typeName(boundValue) + ".");
+        numeric::Index bound = numeric::toIndex(boundValue);
+        if (!bound.isInteger) {
+            runtimeError(std::string("Slice ") + label + " bound must be an integer, got " + typeName(boundValue) + ".");
         }
-        double n = asNumber(boundValue);
-        if (std::floor(n) != n) {
-            runtimeError(std::string("Slice ") + label + " bound must be an integer, got " + stringify(boundValue) + ".");
-        }
-        return n < 0.0 ? n + length : n;
+        return bound.value < 0 ? bound.value + length : bound.value;
     };
 
     // Out-of-range/start-after-stop bounds clamp to an empty result
     // rather than erroring, unlike single-index access -- decision 3's
     // deliberately more lenient treatment of a degenerate slice range.
-    double start = std::clamp(resolveBound(startValue, 0.0, "start"), 0.0, length);
-    double stop = std::clamp(resolveBound(stopValue, length - 1.0, "stop"), -1.0, length - 1.0);
+    int64_t start = std::clamp(resolveBound(startValue, 0, "start"), int64_t{0}, length);
+    int64_t stop = std::clamp(resolveBound(stopValue, length - 1, "stop"), int64_t{-1}, length - 1);
 
     auto* result = allocate<ObjVector>();
     if (start <= stop) {
@@ -199,6 +175,30 @@ Value Vm::getSlice(const Value& receiver, const Value& startValue, const Value& 
         result->elements.assign(startIt, stopIt);
     }
     return objValue(result);
+}
+
+void Vm::numericSlowPath(bytecode::OpCode op, const Value& a, const Value& b) {
+    using bytecode::OpCode;
+    Value result;
+    try {
+        switch (op) {
+            case OpCode::Add: result = numeric::add(*this, a, b); break;
+            case OpCode::Subtract: result = numeric::subtract(*this, a, b); break;
+            case OpCode::Multiply: result = numeric::multiply(*this, a, b); break;
+            case OpCode::Divide: result = numeric::divide(*this, a, b); break;
+            case OpCode::Modulo: result = numeric::modulo(*this, a, b); break;
+            case OpCode::Power: result = numeric::power(*this, a, b); break;
+            case OpCode::Negate: result = numeric::negate(*this, a); break;
+            case OpCode::Greater: result = boolValue(numeric::compare(a, b) > 0); break;
+            case OpCode::GreaterEqual: result = boolValue(numeric::compare(a, b) >= 0); break;
+            case OpCode::Less: result = boolValue(numeric::compare(a, b) < 0); break;
+            case OpCode::LessEqual: result = boolValue(numeric::compare(a, b) <= 0); break;
+            default: throw std::logic_error("numericSlowPath: not a numeric opcode");
+        }
+    } catch (const RuntimeError& error) {
+        runtimeError(error.what());
+    }
+    push(result);
 }
 
 uint8_t Vm::readByte(CallFrame& frame) { return frame.closure->function->chunk.code[frame.ip++]; }
@@ -471,49 +471,71 @@ void Vm::run() {
                 globals[name->value] = pop();
                 break;
             }
+            // Arithmetic (docs/PLAN-0.4.md decisions 3-6): numeric.cpp has the
+            // rules. Operands are popped first; each operation reads them
+            // fully before it allocates its result, so a collection that
+            // allocation triggers can't free an operand still in use.
             case OpCode::Add: {
                 Value b = pop(), a = pop();
-                checkNumberOperands(a, b, "Operands must be numbers.");
-                push(numberValue(asNumber(a) + asNumber(b)));
+                int64_t r;
+                if (isSmallInt(a) && isSmallInt(b) && !numeric::addOverflows(asSmallInt(a), asSmallInt(b), r)) {
+                    push(smallIntValue(r));
+                } else if (isDouble(a) && isDouble(b)) {
+                    push(doubleValue(asDouble(a) + asDouble(b)));
+                } else {
+                    numericSlowPath(OpCode::Add, a, b);
+                }
                 break;
             }
             case OpCode::Subtract: {
                 Value b = pop(), a = pop();
-                checkNumberOperands(a, b, "Operands must be numbers.");
-                push(numberValue(asNumber(a) - asNumber(b)));
+                int64_t r;
+                if (isSmallInt(a) && isSmallInt(b) && !numeric::subtractOverflows(asSmallInt(a), asSmallInt(b), r)) {
+                    push(smallIntValue(r));
+                } else if (isDouble(a) && isDouble(b)) {
+                    push(doubleValue(asDouble(a) - asDouble(b)));
+                } else {
+                    numericSlowPath(OpCode::Subtract, a, b);
+                }
                 break;
             }
             case OpCode::Multiply: {
                 Value b = pop(), a = pop();
-                checkNumberOperands(a, b, "Operands must be numbers.");
-                push(numberValue(asNumber(a) * asNumber(b)));
+                int64_t r;
+                if (isSmallInt(a) && isSmallInt(b) && !numeric::multiplyOverflows(asSmallInt(a), asSmallInt(b), r)) {
+                    push(smallIntValue(r));
+                } else if (isDouble(a) && isDouble(b)) {
+                    push(doubleValue(asDouble(a) * asDouble(b)));
+                } else {
+                    numericSlowPath(OpCode::Multiply, a, b);
+                }
                 break;
             }
             case OpCode::Divide: {
                 Value b = pop(), a = pop();
-                checkNumberOperands(a, b, "Operands must be numbers.");
-                if (asNumber(b) == 0.0) {
-                    runtimeError("Division by zero.");
-                }
-                push(numberValue(asNumber(a) / asNumber(b)));
+                numericSlowPath(OpCode::Divide, a, b);
                 break;
             }
             case OpCode::Modulo: {
                 Value b = pop(), a = pop();
-                checkNumberOperands(a, b, "Operands must be numbers.");
-                push(numberValue(pythonStyleModulo(asNumber(a), asNumber(b))));
+                // Floored, like numeric::modulo; y == -1 and 0 take the slow
+                // path (INT64_MIN % -1 is undefined, and 0 is an error).
+                if (isSmallInt(a) && isSmallInt(b) && asSmallInt(b) > 0) {
+                    int64_t r = asSmallInt(a) % asSmallInt(b);
+                    push(smallIntValue(r < 0 ? r + asSmallInt(b) : r));
+                } else {
+                    numericSlowPath(OpCode::Modulo, a, b);
+                }
                 break;
             }
             case OpCode::Power: {
                 Value b = pop(), a = pop();
-                checkNumberOperands(a, b, "Operands must be numbers.");
-                push(numberValue(std::pow(asNumber(a), asNumber(b))));
+                numericSlowPath(OpCode::Power, a, b);
                 break;
             }
             case OpCode::Negate: {
                 Value a = pop();
-                checkNumberOperand(a, "Operand must be a number.");
-                push(numberValue(-asNumber(a)));
+                numericSlowPath(OpCode::Negate, a, a);
                 break;
             }
             case OpCode::Not:
@@ -531,26 +553,38 @@ void Vm::run() {
             }
             case OpCode::Greater: {
                 Value b = pop(), a = pop();
-                checkNumberOperands(a, b, "Operands must be numbers.");
-                push(boolValue(asNumber(a) > asNumber(b)));
+                if (isSmallInt(a) && isSmallInt(b)) {
+                    push(boolValue(asSmallInt(a) > asSmallInt(b)));
+                } else {
+                    numericSlowPath(OpCode::Greater, a, b);
+                }
                 break;
             }
             case OpCode::GreaterEqual: {
                 Value b = pop(), a = pop();
-                checkNumberOperands(a, b, "Operands must be numbers.");
-                push(boolValue(asNumber(a) >= asNumber(b)));
+                if (isSmallInt(a) && isSmallInt(b)) {
+                    push(boolValue(asSmallInt(a) >= asSmallInt(b)));
+                } else {
+                    numericSlowPath(OpCode::GreaterEqual, a, b);
+                }
                 break;
             }
             case OpCode::Less: {
                 Value b = pop(), a = pop();
-                checkNumberOperands(a, b, "Operands must be numbers.");
-                push(boolValue(asNumber(a) < asNumber(b)));
+                if (isSmallInt(a) && isSmallInt(b)) {
+                    push(boolValue(asSmallInt(a) < asSmallInt(b)));
+                } else {
+                    numericSlowPath(OpCode::Less, a, b);
+                }
                 break;
             }
             case OpCode::LessEqual: {
                 Value b = pop(), a = pop();
-                checkNumberOperands(a, b, "Operands must be numbers.");
-                push(boolValue(asNumber(a) <= asNumber(b)));
+                if (isSmallInt(a) && isSmallInt(b)) {
+                    push(boolValue(asSmallInt(a) <= asSmallInt(b)));
+                } else {
+                    numericSlowPath(OpCode::LessEqual, a, b);
+                }
                 break;
             }
             case OpCode::Jump:
@@ -840,7 +874,7 @@ void Vm::run() {
                 if (!isObj(receiver) || asObj(receiver)->type != ObjType::Vector) {
                     runtimeError("Only vectors have a length, got " + typeName(receiver) + ".");
                 }
-                push(numberValue(static_cast<double>(static_cast<ObjVector*>(asObj(receiver))->elements.size())));
+                push(smallIntValue(static_cast<int64_t>(static_cast<ObjVector*>(asObj(receiver))->elements.size())));
                 break;
             }
             case OpCode::VectorAppend: {
@@ -898,6 +932,7 @@ void Vm::markObject(Obj* obj) {
 void Vm::markRoots() {
     for (const Value& value : stack) markValue(value);
     for (auto& [name, value] : globals) markValue(value);
+    for (const Value& value : tempRoots) markValue(value);
     for (ObjUpvalue* upvalue = openUpvalues; upvalue != nullptr; upvalue = upvalue->nextOpen) markObject(upvalue);
     // Every `frames[i].closure` is also sitting on `stack` at its own call
     // site (see `call`'s calling convention note in vm.hpp), so the stack
@@ -943,6 +978,9 @@ void Vm::blackenObject(Obj* obj) {
             markObject(bound->method);
             break;
         }
+        case ObjType::BigInt:
+            // Its digits are mini-gmp memory it owns, not GC objects.
+            break;
     }
 }
 

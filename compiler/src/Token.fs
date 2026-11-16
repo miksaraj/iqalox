@@ -85,7 +85,12 @@ type TokenType =
 /// non-literal token (punctuation, keywords, identifiers, EOF).
 type Literal =
     | NoLiteral
-    | NumberLiteral of float
+    /// An integer literal (`42`, `0xFF`, `1_000`): exact, any size
+    /// (`docs/PLAN-0.4.md` decisions 1-2).
+    | IntLiteral of bigint
+    /// A float literal: one with a decimal point (`3.14`, `.5`, `1.`) or an
+    /// exponent (`1e9`).
+    | FloatLiteral of float
     | StringLiteral of string
 
 type Token =

@@ -1,8 +1,7 @@
 #include "value.hpp"
 
-#include <charconv>
-#include <cmath>
 
+#include "numeric.hpp"
 #include "object.hpp"
 
 namespace iqalox {
@@ -36,6 +35,10 @@ bool objectsEqual(Obj* a, Obj* b) {
         // -- Python's default `==` (what `is_equal` relies on for
         // everything it doesn't special-case) falls back to identity,
         // already handled by the `a == b` check above.
+        // Canonical representation (numeric.hpp): equal big integers are
+        // both ObjBigInts, never one inline int64 and one ObjBigInt.
+        case ObjType::BigInt:
+            return mpz_cmp(static_cast<ObjBigInt*>(a)->value.get(), static_cast<ObjBigInt*>(b)->value.get()) == 0;
         case ObjType::Function:
         case ObjType::Closure:
         case ObjType::NativeFunction:
@@ -54,7 +57,9 @@ bool valuesEqual(const Value& a, const Value& b) {
     if (a.index() != b.index()) return false;
     if (isNil(a) || isUndef(a)) return true;
     if (isBool(a)) return asBool(a) == asBool(b);
-    if (isNumber(a)) return asNumber(a) == asNumber(b);
+    if (isSmallInt(a)) return asSmallInt(a) == asSmallInt(b);
+    // IEEE: `nan == nan` is false, `0.0 == -0.0` is true.
+    if (isDouble(a)) return asDouble(a) == asDouble(b);
     return objectsEqual(asObj(a), asObj(b));
 }
 
@@ -62,7 +67,8 @@ std::string typeName(const Value& v) {
     if (isNil(v)) return "nil";
     if (isUndef(v)) return "undef";
     if (isBool(v)) return "bool";
-    if (isNumber(v)) return "number";
+    if (isSmallInt(v)) return "int";
+    if (isDouble(v)) return "float";
     switch (asObj(v)->type) {
         case ObjType::String: return "string";
         case ObjType::Vector: return "vector";
@@ -73,75 +79,18 @@ std::string typeName(const Value& v) {
         case ObjType::Class: return "class";
         case ObjType::Instance: return "instance";
         case ObjType::BoundMethod: return "function";
+        case ObjType::BigInt: return "int";
     }
     return "value";
 }
 
-namespace {
-
-// Python's `repr(float)`: the shortest decimal that round-trips back to
-// the same double, in fixed notation for "ordinary-sized" magnitudes and
-// scientific notation outside that range -- switching at the same
-// thresholds CPython does (exponent < -4 or >= 16), confirmed empirically
-// against `python3 -c "print(repr(v))"` for both boundaries and a range
-// of ordinary/huge/tiny values, since libstdc++'s own `to_chars` "general"
-// format picks fixed vs. scientific by shortest-output-length instead,
-// which disagrees with Python for plenty of everyday values (e.g. it
-// renders 100000000.0 as "1e+08"; Python keeps "100000000.0").
-std::string formatNumber(double v) {
-    if (std::isnan(v)) return "nan";
-    if (std::isinf(v)) return v < 0 ? "-inf" : "inf";
-
-    char buf[64];
-    auto result = std::to_chars(buf, buf + sizeof(buf), v, std::chars_format::scientific);
-    std::string sci(buf, result.ptr);
-
-    size_t ePos = sci.find('e');
-    int exponent = std::stoi(sci.substr(ePos + 1));
-
-    // `std::to_chars`' own scientific form already matches Python's exact
-    // spelling (lowercase `e`, sign, minimum 2-digit exponent) for every
-    // case checked, so reuse it verbatim rather than reassembling it.
-    if (exponent < -4 || exponent >= 16) {
-        return sci;
-    }
-
-    bool negative = sci.front() == '-';
-    size_t start = negative ? 1 : 0;
-    std::string digits;
-    for (size_t i = start; i < ePos; ++i) {
-        if (sci[i] != '.') digits.push_back(sci[i]);
-    }
-
-    std::string out = negative ? "-" : "";
-    if (exponent >= 0) {
-        auto pointPos = static_cast<size_t>(exponent) + 1;
-        if (digits.size() <= pointPos) {
-            // A whole number -- deliberately left with no trailing ".0"
-            // here, matching poc's `stringify`, which strips exactly that
-            // suffix from Python's own `str(float)`.
-            out += digits;
-            out.append(pointPos - digits.size(), '0');
-        } else {
-            out += digits.substr(0, pointPos);
-            out += '.';
-            out += digits.substr(pointPos);
-        }
-    } else {
-        out += "0.";
-        out.append(static_cast<size_t>(-exponent - 1), '0');
-        out += digits;
-    }
-    return out;
-}
-
-}  // namespace
 
 std::string stringify(const Value& v) {
     if (isNil(v)) return "nil";
     if (isUndef(v)) return "undef";
     if (isBool(v)) return asBool(v) ? "true" : "false";
-    if (isNumber(v)) return formatNumber(asNumber(v));
+    if (isSmallInt(v)) return numeric::formatInteger(v);
+    if (isDouble(v)) return numeric::formatFloat(asDouble(v));
 
     switch (asObj(v)->type) {
         case ObjType::String:
@@ -170,6 +119,8 @@ std::string stringify(const Value& v) {
             return "<" + static_cast<ObjInstance*>(asObj(v))->klass->name + " instance>";
         case ObjType::BoundMethod:
             return "<fun " + static_cast<ObjBoundMethod*>(asObj(v))->method->function->name + ">";
+        case ObjType::BigInt:
+            return numeric::formatInteger(v);
     }
     return "<value>";
 }

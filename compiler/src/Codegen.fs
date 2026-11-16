@@ -221,13 +221,22 @@ type private FunctionState(initialStackDepth: int) =
             | JumpIfNotNil _ -> JumpIfNotNil target
             | other -> failwith $"unreachable: patching a non-jump instruction %A{other}"
 
-    member _.AddNumberConstant(n: float) : int =
+    member _.AddFloatConstant(n: float) : int =
         match constants |> Seq.tryFindIndex (function
-            | NumberConstant existing -> BitConverter.DoubleToInt64Bits existing = BitConverter.DoubleToInt64Bits n
+            | FloatConstant existing -> BitConverter.DoubleToInt64Bits existing = BitConverter.DoubleToInt64Bits n
             | _ -> false) with
         | Some i -> i
         | None ->
-            constants.Add(NumberConstant n)
+            constants.Add(FloatConstant n)
+            constants.Count - 1
+
+    member _.AddIntConstant(n: bigint) : int =
+        match constants |> Seq.tryFindIndex (function
+            | IntConstant existing -> existing = n
+            | _ -> false) with
+        | Some i -> i
+        | None ->
+            constants.Add(IntConstant n)
             constants.Count - 1
 
     member _.AddStringConstant(s: string) : int =
@@ -328,7 +337,8 @@ type private Codegen(elideEpilogue: bool) =
         | BLiteral NilValue -> state.Emit Nil |> ignore
         | BLiteral(BoolValue true) -> state.Emit True |> ignore
         | BLiteral(BoolValue false) -> state.Emit False |> ignore
-        | BLiteral(NumberValue n) -> state.Emit(Constant(state.AddNumberConstant n)) |> ignore
+        | BLiteral(IntValue n) -> state.Emit(Constant(state.AddIntConstant n)) |> ignore
+        | BLiteral(FloatValue n) -> state.Emit(Constant(state.AddFloatConstant n)) |> ignore
         | BLiteral(StringValue s) -> state.Emit(Constant(state.AddStringConstant s)) |> ignore
         | BGrouping inner -> this.CompileExpr inner
         | BVariable(binding, _) -> this.CompileGetBinding binding
@@ -352,7 +362,9 @@ type private Codegen(elideEpilogue: bool) =
                 match right with
                 | BVariable(binding, _) ->
                     this.CompileGetBinding binding
-                    state.Emit(Constant(state.AddNumberConstant 1.0)) |> ignore
+                    // An int 1: `++` keeps an int an int, and a float stays a
+                    // float under mixed promotion (`docs/PLAN-0.4.md` decision 6).
+                    state.Emit(Constant(state.AddIntConstant 1I)) |> ignore
                     state.Emit(if operator.Type = PlusPlus then Add else Subtract) |> ignore
                     this.CompileSetBinding binding
                 | other -> failwith $"unreachable: increment/decrement target is always a variable, got %A{other}"

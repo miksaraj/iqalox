@@ -83,12 +83,16 @@ Two answers changed the plan's shape and needed their own follow-up rounds:
    `1 + 2.5 == 3.5` and `3 < 3.5` is true. An int whose magnitude doesn't
    fit a double raises a runtime error when promoted, whether by `float x`
    or by mixing (`2 ^ 2000 + 0.5`): "Integer too large to convert to
-   float." Silently saturating to `inf` was rejected.
+   float." Silently saturating to `inf` was rejected. *Refined at Phase 1
+   start (decisions 31-32):* ordering doesn't promote after all, it
+   compares exactly; and `/` and a negative `^` on two integers compute
+   exactly before rounding once.
 7. **`==` compares type and value, so `1 == 1.0` is false**, the same rule
    that already makes `1 == "1"` false. This also fixes `0.5`'s dictionary
    keys: `d[1]` and `d[1.0]` are different keys. **The consequence was asked
-   about and accepted**: since ordering promotes (decision 6), `1 <= 1.0` and
-   `1 >= 1.0` are both true while `1 == 1.0` is false. This is documented as a
+   about and accepted**: since ordering compares numeric value (decision 6;
+   exactly, per decision 31), `1 <= 1.0` and `1 >= 1.0` are both true while
+   `1 == 1.0` is false. This is documented as a
    known quirk of the design, not something to fix. Two related choices:
    - **Floats follow plain IEEE-754.** `nan == nan` is false, every ordering
      involving `nan` is false (test with `std.math.isNan`), and
@@ -102,9 +106,11 @@ Two answers changed the plan's shape and needed their own follow-up rounds:
    inherited from `poc`. It applies everywhere stringification does: inside
    printed vectors, `concat`, `str` and `format`'s `{}`. `-0.0` prints as
    `-0.0`, and `inf`, `-inf` and `nan` print as those words, as today.
-   Integers print in full decimal, however large.
+   Integers print in full decimal, however large. The decimal point holds
+   in scientific notation too (decision 30): `1.0e+16` where Python prints
+   `1e+16`.
 9. **Vector (and string) indices and slice bounds must be integers.**
-   `v[1.0]` is a runtime error ("Index must be an integer, got float."),
+   `v[1.0]` is a runtime error ("Vector index must be an integer, got float."),
    even when the float is whole. This catches a `/` result used as an index
    by accident. `length` returns an int.
 10. **Bitwise operators are symbols, Lua-style.**
@@ -170,6 +176,46 @@ Two answers changed the plan's shape and needed their own follow-up rounds:
     `vm/` keeps its runtime "Division by zero." check as a backstop for
     bytecode not produced by `iqaloxc`. It is unreachable from compiled
     source.
+
+### Decided at Phase 1 start
+
+Asked when Phase 1 began, alongside §2 items 1 and 3 (resolved below).
+These are the details of how exact integers meet floats that decisions
+1-9 didn't reach.
+
+30. **Scientific notation keeps the decimal point: `1.0e+16`**, not
+    Python's `1e+16` (Ruby's form). It applies to `1.0e-05`, and leaves
+    `1.5e+300` as is.
+31. **Ordering between an integer and a float is exact**, as in Python. It
+    neither rounds the integer nor raises "too large":
+    `2 ^ 53 + 1 > 9007199254740992.0` is true, and `2 ^ 2000 < 1.5` is
+    false. Arithmetic still promotes (decision 6).
+32. **`/` on two integers is computed exactly and rounded once** (Python),
+    so `(2 ^ 2000) / (2 ^ 1999) == 2.0`; only a result beyond the float
+    range is an error. **Integer `^` with a negative exponent works the
+    same way**: `(2 ^ 2000) ^ -1 == 0.0`, never "too large to convert".
+33. **A float literal beyond the double range is a compile-time error**
+    ("Float literal is too large.", as in Go, Java and Swift). One below
+    it, like `1e-400`, is `0.0`.
+34. **Exact integers have a size limit: 2^26 bits** (about 20 million
+    digits). A larger result is a runtime error ("Integer result too
+    large."), checked before computing wherever the size is predictable
+    (`*`, `^`). Without it, `2 ^ 10000000000` would exhaust memory and
+    abort the VM with no Iqalox error. The same limit applies to integer
+    literals at compile time. It can be raised later without breaking
+    programs.
+35. **Integer `0 ^ -1` gets the same prove-or-guard compile-time rule as
+    division** (§2 item 3, resolved). That follows exact-integer
+    languages (Python, Ruby, Scheme, Haskell's `^`, JS `BigInt`) rather
+    than float-only ones (JS `Number`, Lua, C `pow`), which give `inf`.
+    - A `^` is accepted if its base is a non-zero constant (`2 ^ n`) or
+      guarded (`x != 0`), or its exponent is a non-negative constant
+      (`x ^ 2`) or guarded (`n >= 0`).
+    - Only `x ^ n`, with both unknown, needs a guard.
+    - A float `0.0` base gives `inf` under the IEEE rule, so the
+      `x != 0` guard stays sound.
+    - Phase 3 implements it; until then the VM raises "Division by
+      zero." at runtime.
 
 ### String model
 
@@ -340,13 +386,11 @@ Small items not fully covered by the answers above. Each will be put to
 the repository owner when its phase starts, the way `0.3`'s open question
 1 was settled at Phase 6, not silently resolved.
 
-1. **Two `_` placements the permissive-literal answer didn't cover.**
-   - A **trailing** `_` (`1_`) can't simply be allowed: `_` is already the
-     ignore operator, so `1_` reads as `1` followed by `_`.
-   - A `_` **next to the decimal point** (`1_.5`, `1._5`) wasn't covered.
-
-   Proposed for Phase 1: both are compile-time scan errors. A leading `_`
-   (`_1`) is necessarily an identifier, as today.
+1. **RESOLVED at Phase 1 start.** A trailing `_` (`1_`) and a `_` next to
+   the decimal point (`1_.5`, `1._5`) are both compile-time scan errors, as
+   proposed. Phase 1 also treats a `_` next to the exponent marker (`1_e5`,
+   `1e_5`) the same way, since it's the same case. A leading `_` (`_1`) is
+   necessarily an identifier, as before.
 2. **The exact `format` spec subset.** Proposed:
    `[[fill]align][sign][0][width][.precision][type]`, with
    - aligns `< > ^`;
@@ -357,11 +401,9 @@ the repository owner when its phase starts, the way `0.3`'s open question
    A type that doesn't match the value is a runtime error (`{:d}` on a
    float, say). Python's thousands-grouping `,` and `_` are left out unless
    wanted. To confirm at Phase 6 start.
-3. **`0 ^ -1`.** The `^` rule (decision 5) gives a float for a negative
-   exponent. Proposed: `inf`, the IEEE result of `pow(0.0, -1.0)`,
-   consistent with decision 12's float-zero rule, since `^` isn't one of
-   the three division operators. Python raises `ZeroDivisionError` here. To
-   confirm at Phase 1 start.
+3. **RESOLVED at Phase 1 start: decision 35.** The owner asked what other
+   languages do before deciding, and chose a compile-time prove-or-guard
+   rule like division's over the `inf` originally proposed here.
 4. **Engineering choices, recorded here, not design questions**
    (`CLAUDE.md`: engineering is fair game):
    - **Arbitrary-precision integers**: an `int64_t` fast path held inline
@@ -464,12 +506,12 @@ land it, verified by new tests (§6).
 
 | Feature | Design decision(s) | Status |
 |---|---|---|
-| Integer type: literals, exact arbitrary precision, `/`, `^`, mixed promotion, `==`, printing | §1.1-9 | Not started |
-| Hex/binary/octal, separators, exponent literals | §1.2 | Not started |
-| Integer-only indices and slice bounds; `length` returns int | §1.9 | Not started |
+| Integer type: literals, exact arbitrary precision, `/`, `^`, mixed promotion, `==`, printing | §1.1-9, §1.30-34 | Done |
+| Hex/binary/octal, separators, exponent literals | §1.2 | Done |
+| Integer-only indices and slice bounds; `length` returns int | §1.9 | Done |
 | `//` integer division | §1.4 | Not started |
 | Bitwise operators `& \| ~ << >>` | §1.10 | Not started |
-| Compile-time division-by-zero check; IEEE float zero | §1.12 | Not started |
+| Compile-time division-by-zero check (incl. `0 ^ -1`); IEEE float zero | §1.12, §1.35 | Not started |
 | Code-point strings: indexing, negative, slices, immutability | §1.13-14 | Not started |
 | String iteration (generators, spread) and ordering | §1.15-16 | Not started |
 | `\u{...}` / `\x..` escapes; raw strings `r"..."` | §1.17-18 | Not started |
@@ -576,25 +618,135 @@ Build, CI and release changes:
 - No new actions were added; every `uses:` is one already SHA-pinned in
   the repo.
 
-**Phase 1 — The integer type.** Decisions 1-3 and 5-9:
-- the scanner's literal forms;
-- the `int64_t` + `ObjBigInt` value;
-- bytecode v4 constants;
-- `/` always float, `^`, mixed promotion with the too-large error,
-  type-strict `==`, and float printing with `.0`;
-- integer-only indices and slice bounds, and `length` returning an int;
-- `Optimizer.fs` constant folding updated to the new semantics.
+**Phase 1 — The integer type — done.** Decisions 1-3, 5-9 and 30-35.
+§2 items 1 and 3 were put to the owner first. Four more questions came
+up while settling them and became decisions 30-34: how scientific floats
+print, exact mixed comparison, exact-then-round `/` and negative `^`,
+`1e400`, and the size limit.
 
-At the phase's start, put §2 items 1 and 3 to the owner. Expect broad
-churn in expected outputs (`print 7 / 7` now prints `1.0`) across xUnit,
-Catch2 and `langspec/examples/`, and in the benchmark corpus.
+*Compiler.*
+- **Scanner.** `Scanner.fs` scans every literal form, with permissive `_`
+  rules and one targeted error per bad literal (`Invalid digit 'G' in
+  hexadecimal literal.`). A `.5` float needs a non-expression character
+  before it, so `x.5` stays member access.
+- **Literals through the pipeline.** `Token.Literal` and
+  `Ast.LiteralValue` split into `IntLiteral`/`IntValue` (a `bigint`) and
+  `FloatLiteral`/`FloatValue`, renamed from `Number*`; `Bytecode.Constant`
+  gains `IntConstant`.
+- **Format v4.** Bytecode now encodes an integer as an i64, or as a sign
+  plus little-endian magnitude when it doesn't fit.
+- **Compiler-generated numbers are ints.** `++`/`--` add the integer `1`,
+  and comprehension desugaring starts its index at the integer `0`.
+- **Constant folding** (`Optimizer.fs`) follows the new semantics exactly.
+  - Integers fold exactly, and `==` checks type (so `1 == 1.0` folds to
+    `false`).
+  - A float or mixed case folds only when every integer involved converts
+    to a double exactly (at most 2^53). Larger ones are left to the VM,
+    which rounds big integers itself.
+  - `%` and `^` are still never folded, so a constant `0 ^ -1` reaches
+    the VM's runtime check until Phase 3.
+
+*VM.*
+- **`Value`** gains an inline `int64_t`, and a new `ObjBigInt` holds
+  anything larger. The split is canonical: an `ObjBigInt` never holds a
+  value that fits in 64 bits, so equality and hashing never need to
+  compare across the two forms.
+- **All arithmetic rules live in the new `vm/src/numeric.cpp`**,
+  computed on a plain RAII `BigInt` the GC never sees. Only the final
+  result becomes a heap object, through one allocation, so no
+  intermediate value can be collected mid-operation.
+- **Correct rounding.** Exact-then-round (`/`, negative `^`, big integer
+  to float) uses one routine that rounds a ratio of big integers to the
+  nearest double. It handles subnormal results with a single rounding;
+  tests pin ties, subnormals and overflow.
+- **Exact comparison** compares an integer against a float's integer part
+  exactly, then lets the fraction break a tie.
+- **Portable int64 conversion.** int64 values cross into mini-gmp through
+  `mpz_import`/`mpz_export`, because its `long`-based setters are only
+  32 bits on Windows.
+
+*A pre-existing GC bug, found and fixed.* `natives.cpp`'s `buildMatrix`
+(from `0.2`) allocated each row while the result vector wasn't reachable
+from any GC root. A collection triggered by a row allocation could free
+the half-built result. Matrix arithmetic can now allocate big integers
+too, which makes that far more likely.
+- **The fix** is a new `Vm::TempRoot` guard. It keeps a native's
+  in-progress values reachable, here the result vector and the running
+  sum in `multiply`.
+- **Regression test.** A stress-GC test multiplies big integer matrices.
+  It fails under AddressSanitizer with a heap-use-after-free when the old
+  unrooted code is put back, and passes with the fix.
+
+*A performance trap, found and fixed.* The first version pushed every
+arithmetic result through a small inline `try`/`catch` helper inside
+`Vm::run()`.
+- **Symptom.** Benchmarks ran 30-60% slower than on `main`, although
+  callgrind counted only 6-13% more instructions.
+- **Cause.** Exception landing pads in the dispatch loop cost register
+  allocation for the whole loop.
+- **Fix.** Every slow path moved into one out-of-line function,
+  `numericSlowPath`, the only place with a `try`. `run()` keeps inline
+  fast paths for two int64s (overflow-checked) and two doubles.
+- **Result.** Measured interleaved and pinned to one CPU, 9 runs each,
+  every benchmark is now within noise of `main` or faster:
+
+  | Benchmarks | Change vs `main` |
+  |---|---|
+  | `loop_global`, `loop_local` | -9% to -12% (int `%` is cheaper than `fmod`) |
+  | `closures`, `fib`, `methods` | +2% to +4% |
+  | `collatz` | +8% (see below) |
+
+*Benchmark corpus.*
+- **`collatz.iqx`** halves with `/`, which now gives a float. `==` never
+  equates a float with an int, so the old loop would never end, and
+  integer division `//` doesn't exist until Phase 2. For this phase it
+  runs on floats explicitly (exact: every value stays below 2^53).
+  **Phase 2 must switch it back to integers with `//`.**
+- **`timeconv.iqx`** runs as is; its checksum is now a float, which is
+  correct under decision 3. Phase 2 should move it to `//` as well.
+- No other example or standard-library source divides or uses a float
+  literal. Every `langspec/examples/*.iqx` therefore prints exactly what
+  it did on `main`, since an integer prints like the whole float it
+  replaces.
+
+*Verification.*
+- **Tests.**
+  - xUnit: 356, up from 338. New cases cover every literal form and
+    error, folding under the new semantics, and both v4 constant
+    encodings.
+  - Catch2: 136, up from 125. A new `test_numeric.cpp` covers overflow
+    into a big integer and normalisation back; floored `%`; correctly
+    rounded `/`, including ties and subnormals; every `^` case; the size
+    limit; exact mixed ordering; and type-strict equality, integer-only
+    indices and the stress-GC test.
+- **Sanitizers.** The full VM suite is clean under AddressSanitizer and
+  UndefinedBehaviorSanitizer.
+- **Optimizer differential.** `scripts/optimizer-differential.sh` passes
+  on 244 programs. Its fuzz atoms gained `2.0`, `.25`, `1e300`, 2^53 + 1
+  and 2^64, and unary minus, so folding is exercised exactly where it
+  must defer to the VM.
+- **Example.** A new `langspec/examples/numbers.iqx` covers the phase end
+  to end.
+- **Docs.** `docs/LANGUAGE.md` §2, §3, §5, §8, §9, §13 and §15 (new item
+  13), `langspec/SYNTAX_GRAMMAR.md` (now titled `0.4`) and the root
+  README's lexical grammar are updated.
+
+*Known limitation, documented (`docs/LANGUAGE.md` §15 item 13).*
+mini-gmp has only quadratic multiplication.
+- Squaring a 1.6-million-bit integer takes about 2.3 s (Python: 0.17 s).
+- Printing a 47,713-digit number takes about 0.6 s.
+- Integers that fit in 64 bits never touch mini-gmp. Full GMP has the
+  same API, so swapping it in would be a contained change if `1.2`'s
+  measurements call for it.
 
 **Phase 2 — `//` and bitwise operators.** Decisions 4 and 10: new
 tokens, the four precedence levels, unary `~`, the vector-head `|` rule,
-the opcodes, and two's-complement semantics over bigints.
+the opcodes, and two's-complement semantics over bigints. Also return
+`bench/realistic/collatz.iqx` to integers with `//`, and move
+`timeconv.iqx` to `//` (see Phase 1).
 
-**Phase 3 — Compile-time division-by-zero check.** Decision 12:
-- the narrowing pass;
+**Phase 3 — Compile-time division-by-zero check.** Decisions 12 and 35:
+- the narrowing pass, covering `^` as well as `/`, `//` and `%`;
 - the constant-`0.0` warning;
 - IEEE float-zero division in the VM;
 - bringing `Stdlib.fs`'s Iqalox sources, `langspec/examples/` and
@@ -701,11 +853,11 @@ On top of that, this version needs:
   it. If real programs show the rule is too strict to live with
   (something common that is genuinely safe but unprovable), bring the
   concrete cases to the owner rather than widening the rule on our own.
-- **Performance of the new value representation.** Adding `int64_t` and
-  bigints to `Value`, and checking types on every arithmetic op, could
-  slow the 10M-iteration loop measured for `1.0`'s speed target. Measure
-  `bench/` before and after Phase 1, and keep the `int64` path free of
-  allocation.
+- **Performance of the new value representation.** *Retired by Phase 1*:
+  measured at parity with `main` or faster (see Phase 1).
+  - **The lesson for later phases.** Keep `try` blocks and other
+    exception scaffolding out of `Vm::run()`; slow paths belong in
+    out-of-line helpers. A 30-60% regression came from that alone.
 - **Wide churn from the numeric model.** Printing, `length`, indices and
   `/` all change observable behaviour, so nearly every test file and
   fixture changes in Phase 1. Keep that phase's diff mechanical where

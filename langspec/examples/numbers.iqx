@@ -1,0 +1,55 @@
+<#
+    Numbers (0.4, docs/PLAN-0.4.md decisions 1-9 and the Phase 1
+    follow-ups): exact, arbitrary-precision integers next to IEEE floats.
+
+    A literal with a decimal point or an exponent is a float; one without is
+    an integer. `/` always gives a float; integer `^` with a non-negative
+    exponent stays exact. `==` compares type and value, so `1 == 1.0` is
+    false, while ordering compares exact values across both kinds.
+#>
+
+import std.vector.length
+
+# Literals.
+print 42
+print 3.14
+print .5
+print 1.
+print 6.02e23
+print 0xFF
+print 0b1010
+print 0o17
+print 1_000_000
+
+# Integers are exact at any size.
+print (2 ^ 100)
+print (9223372036854775807 + 1)
+
+# `/` always gives a float, exact and rounded once.
+print (7 / 2)
+print (6 / 2)
+print ((2 ^ 2000) / (2 ^ 1999))
+
+# A negative exponent gives a float too.
+print (2 ^ -1)
+
+# Mixed integer/float arithmetic gives a float.
+print (1 + 2.5)
+
+# `%` takes the divisor's sign, for integers and floats alike.
+print (-7 % 2)
+print (7.5 % 2)
+
+# Equality: type and value. Ordering: exact values.
+print (1 == 1.0)
+print (1 <= 1.0)
+print ((2 ^ 53) + 1 > 9007199254740992.0)
+
+# Floats always print with a decimal point, even in scientific notation.
+print 1e16
+print 0.00001
+
+# `length` returns an integer, and only an integer indexes.
+var v = [10, 20, 30]
+print (length v)
+print v[length v - 1]

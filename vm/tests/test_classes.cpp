@@ -26,7 +26,7 @@ TEST_CASE("a class with no init constructs a bare instance, and fields get/set",
     uint16_t pointName = b.addStringConstant("Point");
     uint16_t pName = b.addStringConstant("p");
     uint16_t xName = b.addStringConstant("x");
-    uint16_t five = b.addNumberConstant(5);
+    uint16_t five = b.addIntConstant(5);
     uint16_t resultName = b.addStringConstant("result");
 
     b.emitU16(OpCode::Class, pointName);
@@ -53,7 +53,7 @@ TEST_CASE("a class with no init constructs a bare instance, and fields get/set",
 
     vm.interpret(b.build());
 
-    REQUIRE(asNumber(*vm.getGlobal("result")) == 5.0);
+    REQUIRE(asSmallInt(*vm.getGlobal("result")) == 5);
 }
 
 TEST_CASE("init runs with self bound and its own return value is discarded for the instance", "[vm][classes]") {
@@ -93,8 +93,8 @@ TEST_CASE("init runs with self bound and its own return value is discarded for t
     uint16_t sumName = b.addStringConstant("sum");
     uint16_t xDeclName = b.addStringConstant("x");
     uint16_t yDeclName = b.addStringConstant("y");
-    uint16_t three = b.addNumberConstant(3);
-    uint16_t four = b.addNumberConstant(4);
+    uint16_t three = b.addIntConstant(3);
+    uint16_t four = b.addIntConstant(4);
     uint16_t pName = b.addStringConstant("p");
     uint16_t resultName = b.addStringConstant("result");
 
@@ -127,7 +127,7 @@ TEST_CASE("init runs with self bound and its own return value is discarded for t
 
     vm.interpret(b.build());
 
-    REQUIRE(asNumber(*vm.getGlobal("result")) == 7.0);
+    REQUIRE(asSmallInt(*vm.getGlobal("result")) == 7);
 }
 
 TEST_CASE("calling a class with the wrong argument count for init is a runtime error", "[vm][classes]") {
@@ -157,7 +157,7 @@ TEST_CASE("calling a class with no init and any arguments is a runtime error", "
     Vm vm;
     ChunkBuilder b(vm);
     uint16_t pointName = b.addStringConstant("Point");
-    uint16_t one = b.addNumberConstant(1);
+    uint16_t one = b.addIntConstant(1);
 
     b.emitU16(OpCode::Class, pointName);
     b.emitU16(OpCode::DefineGlobal, pointName);
@@ -191,7 +191,7 @@ TEST_CASE("reading an undefined property is a runtime error", "[vm][classes]") {
 TEST_CASE("getting a property on a non-instance is a runtime error", "[vm][classes]") {
     Vm vm;
     ChunkBuilder b(vm);
-    uint16_t five = b.addNumberConstant(5);
+    uint16_t five = b.addIntConstant(5);
     uint16_t xName = b.addStringConstant("x");
 
     b.emitU16(OpCode::Constant, five);
@@ -203,8 +203,8 @@ TEST_CASE("getting a property on a non-instance is a runtime error", "[vm][class
 TEST_CASE("setting a property on a non-instance is a runtime error", "[vm][classes]") {
     Vm vm;
     ChunkBuilder b(vm);
-    uint16_t five = b.addNumberConstant(5);
-    uint16_t one = b.addNumberConstant(1);
+    uint16_t five = b.addIntConstant(5);
+    uint16_t one = b.addIntConstant(1);
     uint16_t xName = b.addStringConstant("x");
 
     b.emitU16(OpCode::Constant, five);
@@ -218,7 +218,7 @@ TEST_CASE("extending a non-class value is a runtime error", "[vm][classes]") {
     Vm vm;
     ChunkBuilder b(vm);
     uint16_t notAClassName = b.addStringConstant("NotAClass");
-    uint16_t five = b.addNumberConstant(5);
+    uint16_t five = b.addIntConstant(5);
     uint16_t dogName = b.addStringConstant("Dog");
 
     b.emitU16(OpCode::Constant, five);
@@ -438,7 +438,7 @@ TEST_CASE("aggressive stress-mode collection doesn't corrupt classes, instances,
     uint16_t initName = b.addStringConstant("init");
     uint16_t getXName = b.addStringConstant("getX");
     uint16_t xDeclName = b.addStringConstant("x");
-    uint16_t fortyTwo = b.addNumberConstant(42);
+    uint16_t fortyTwo = b.addIntConstant(42);
     uint16_t pName = b.addStringConstant("p");
     uint16_t resultName = b.addStringConstant("result");
 
@@ -465,7 +465,7 @@ TEST_CASE("aggressive stress-mode collection doesn't corrupt classes, instances,
 
     vm.interpret(b.build());
 
-    REQUIRE(asNumber(*vm.getGlobal("result")) == 42.0);
+    REQUIRE(asSmallInt(*vm.getGlobal("result")) == 42);
 }
 
 // docs/PLAN-0.2.md Phase 7: property/method visibility (`pub`/`mut`,
@@ -501,7 +501,7 @@ TEST_CASE("a pub (non-mut) property is externally readable but not writable", "[
     uint16_t pointName = b.addStringConstant("Point");
     uint16_t xName = b.addStringConstant("x");
     uint16_t pName = b.addStringConstant("p");
-    uint16_t nine = b.addNumberConstant(9);
+    uint16_t nine = b.addIntConstant(9);
 
     b.emitU16(OpCode::Class, pointName);
     b.emitU16(OpCode::DefineGlobal, pointName);
@@ -540,7 +540,7 @@ TEST_CASE("an immutable property can be set internally exactly once, from anywhe
     uint16_t initIndex = b.addFunctionConstant(initFn);
     uint16_t initName = b.addStringConstant("init");
     uint16_t xDeclName = b.addStringConstant("x");
-    uint16_t one = b.addNumberConstant(1);
+    uint16_t one = b.addIntConstant(1);
 
     b.emitU16(OpCode::Class, pointName);
     b.emitU16(OpCode::DefineGlobal, pointName);
@@ -562,9 +562,9 @@ TEST_CASE("a mut property allows unlimited internal writes", "[vm][classes][visi
     Vm vm;
     ChunkBuilder initBuilder(vm);
     uint16_t nName1 = initBuilder.addStringConstant("n");
-    for (double v : {1.0, 2.0, 3.0}) {
+    for (int64_t v : {1, 2, 3}) {
         initBuilder.emitU16(OpCode::GetLocal, 0);
-        uint16_t constIdx = initBuilder.addNumberConstant(v);
+        uint16_t constIdx = initBuilder.addIntConstant(v);
         initBuilder.emitU16(OpCode::Constant, constIdx);
         initBuilder.emitU16(OpCode::SetPropertySelf, nName1);
         initBuilder.emit(OpCode::Pop);
@@ -609,7 +609,7 @@ TEST_CASE("a mut property allows unlimited internal writes", "[vm][classes][visi
 
     vm.interpret(b.build());
 
-    REQUIRE(asNumber(*vm.getGlobal("result")) == 3.0);
+    REQUIRE(asSmallInt(*vm.getGlobal("result")) == 3);
 }
 
 TEST_CASE("reading an immutable property before it's ever been assigned is a runtime error", "[vm][classes][visibility]") {
@@ -849,7 +849,7 @@ TEST_CASE("mixing in a non-class value is a runtime error", "[vm][classes][mixin
     Vm vm;
     ChunkBuilder b(vm);
     uint16_t notAClassName = b.addStringConstant("NotAClass");
-    uint16_t five = b.addNumberConstant(5);
+    uint16_t five = b.addIntConstant(5);
     uint16_t robotName = b.addStringConstant("Robot");
 
     b.emitU16(OpCode::Constant, five);

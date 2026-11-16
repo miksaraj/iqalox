@@ -53,6 +53,7 @@ add_library(iqaloxvm_core STATIC
     src/value.cpp
     src/vm.cpp
     src/natives.cpp
+    src/numeric.cpp
     src/dependencies.cpp
 )
 target_include_directories(iqaloxvm_core PUBLIC src)

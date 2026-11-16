@@ -31,7 +31,7 @@ let ``single-character identifiers and numbers scan correctly`` () =
     let tokens, errors = scanTokens "5"
     Assert.Empty(errors)
     Assert.Equal(Number, tokens.[0].Type)
-    Assert.Equal(NumberLiteral 5.0, tokens.[0].Literal)
+    Assert.Equal(IntLiteral 5I, tokens.[0].Literal)
 
 [<Fact>]
 let ``decimal number literals scan as a single token`` () =
@@ -42,13 +42,20 @@ let ``decimal number literals scan as a single token`` () =
     let tokens, errors = scanTokens "3.14"
     Assert.Empty(errors)
     Assert.Equal<TokenType list>([ Number; Eof ], tokens |> List.map (fun t -> t.Type))
-    Assert.Equal(NumberLiteral 3.14, tokens.[0].Literal)
+    Assert.Equal(FloatLiteral 3.14, tokens.[0].Literal)
     Assert.Equal("3.14", tokens.[0].Lexeme)
 
 [<Fact>]
-let ``a trailing dot with no following digit is not consumed as a fraction`` () =
+let ``a trailing dot makes a float (docs/PLAN-0.4.md decision 1)`` () =
     let tokens, _ = scanTokens "5."
-    Assert.Equal<TokenType list>([ Number; Dot; Eof ], tokens |> List.map (fun t -> t.Type))
+    Assert.Equal<TokenType list>([ Number; Eof ], tokens |> List.map (fun t -> t.Type))
+    Assert.Equal(FloatLiteral 5.0, tokens.[0].Literal)
+
+[<Fact>]
+let ``a dot followed by another dot is left alone, so spread still scans`` () =
+    let tokens, _ = scanTokens "5..."
+    Assert.Equal<TokenType list>([ Number; Ellipsis; Eof ], tokens |> List.map (fun t -> t.Type))
+    Assert.Equal(IntLiteral 5I, tokens.[0].Literal)
 
 [<Fact>]
 let ``line comment is skipped`` () =
@@ -223,3 +230,84 @@ let ``left arrow scans distinctly from less-than and less-than-or-equal`` () =
     Assert.Equal<TokenType list>([ Identifier; LeftArrow; Identifier; Eof ], tokenTypes "x <- xs")
     Assert.Equal<TokenType list>([ Identifier; Less; Identifier; Eof ], tokenTypes "x < xs")
     Assert.Equal<TokenType list>([ Identifier; LessEqual; Identifier; Eof ], tokenTypes "x <= xs")
+
+// --- docs/PLAN-0.4.md Phase 1: integer and float literals -------------------
+
+let private literalOf (source: string) =
+    let tokens, errors = scanTokens source
+    Assert.Empty(errors)
+    Assert.Equal(Number, tokens.[0].Type)
+    tokens.[0].Literal
+
+let private scanErrorOf (source: string) =
+    let _, errors = scanTokens source
+    Assert.Single(errors).Message
+
+[<Fact>]
+let ``no decimal point means an exact integer, of any size`` () =
+    Assert.Equal(IntLiteral 42I, literalOf "42")
+    Assert.Equal(IntLiteral(bigint.Pow(10I, 30)), literalOf "1000000000000000000000000000000")
+
+[<Fact>]
+let ``a decimal point or an exponent means a float`` () =
+    Assert.Equal(FloatLiteral 3.14, literalOf "3.14")
+    Assert.Equal(FloatLiteral 0.5, literalOf ".5")
+    Assert.Equal(FloatLiteral 1.0, literalOf "1.")
+    Assert.Equal(FloatLiteral 1e9, literalOf "1e9")
+    Assert.Equal(FloatLiteral 2.5e-3, literalOf "2.5e-3")
+    Assert.Equal(FloatLiteral 6.02e23, literalOf "6.02E23")
+    Assert.Equal(FloatLiteral 1e5, literalOf "1.e5")
+    Assert.Equal(FloatLiteral 1e5, literalOf "1e+5")
+
+[<Fact>]
+let ``hex, binary and octal integers, prefixes in either case`` () =
+    Assert.Equal(IntLiteral 255I, literalOf "0xFF")
+    Assert.Equal(IntLiteral 255I, literalOf "0Xff")
+    Assert.Equal(IntLiteral 10I, literalOf "0b1010")
+    Assert.Equal(IntLiteral 3I, literalOf "0B11")
+    Assert.Equal(IntLiteral 15I, literalOf "0o17")
+    Assert.Equal(IntLiteral 7I, literalOf "0O7")
+
+[<Fact>]
+let ``underscore separators are permissive`` () =
+    Assert.Equal(IntLiteral 1000000I, literalOf "1_000_000")
+    Assert.Equal(IntLiteral 1000I, literalOf "1__000")
+    Assert.Equal(IntLiteral 255I, literalOf "0x_FF")
+    Assert.Equal(IntLiteral 65535I, literalOf "0xFF_FF")
+    Assert.Equal(FloatLiteral 1234.5678, literalOf "1_234.567_8")
+    Assert.Equal(FloatLiteral 1e10, literalOf "1e1_0")
+
+[<Fact>]
+let ``underscore at the end, by the decimal point or by the exponent is an error`` () =
+    Assert.Equal("A number literal can't end with '_'.", scanErrorOf "1_")
+    Assert.Equal("A number literal can't end with '_'.", scanErrorOf "0xF_")
+    Assert.Equal("A number literal can't end with '_'.", scanErrorOf "1.5_")
+    Assert.Equal("'_' can't be next to the decimal point.", scanErrorOf "1_.5")
+    Assert.Equal("'_' can't be next to the decimal point.", scanErrorOf "1._5")
+    Assert.Equal("'_' can't be next to the exponent.", scanErrorOf "1_e5")
+    Assert.Equal("'_' can't be next to the exponent.", scanErrorOf "1e_5")
+
+[<Fact>]
+let ``malformed radix literals are one error, not a literal and an identifier`` () =
+    Assert.Equal("A hexadecimal literal needs at least one digit.", scanErrorOf "0x")
+    Assert.Equal("Invalid digit '2' in binary literal.", scanErrorOf "0b102")
+    Assert.Equal("Invalid digit 'G' in hexadecimal literal.", scanErrorOf "0xFG")
+    Assert.Equal("Invalid digit '8' in octal literal.", scanErrorOf "0o8")
+
+[<Fact>]
+let ``a float literal beyond the double range is an error; one below it is zero`` () =
+    Assert.Equal("Float literal is too large.", scanErrorOf "1e400")
+    Assert.Equal(FloatLiteral 0.0, literalOf "1e-400")
+
+[<Fact>]
+let ``a leading-dot float needs whitespace or punctuation before it`` () =
+    // `x.5` stays member access (a parse error later), `f .5` is a call.
+    Assert.Equal<TokenType list>([ Identifier; Dot; Number; Eof ], tokenTypes "x.5")
+    Assert.Equal<TokenType list>([ Identifier; Number; Eof ], tokenTypes "f .5")
+    Assert.Equal<TokenType list>([ LeftParen; Number; RightParen; Eof ], tokenTypes "(.5)")
+    Assert.Equal<TokenType list>([ LeftBracket; Ellipsis; Number; RightBracket; Eof ], tokenTypes "[....5]")
+
+[<Fact>]
+let ``an e not followed by an exponent ends the number`` () =
+    Assert.Equal<TokenType list>([ Number; Identifier; Eof ], tokenTypes "2each")
+    Assert.Equal(IntLiteral 2I, (fst (scanTokens "2each")).[0].Literal)

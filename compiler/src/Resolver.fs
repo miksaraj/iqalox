@@ -942,7 +942,7 @@ type private Resolver
                   Parameters = [ itemParam; listParam ]
                   Body =
                     [ VarStmt(resultName, Some(Vector [ Variable itemParam ]), false)
-                      VarStmt(indexName, Some(Literal(NumberValue 0.0)), true)
+                      VarStmt(indexName, Some(Literal(IntValue 0I)), true)
                       ForStmt(
                           None,
                           Some(Binary(Variable indexName, lessOp, InternalVectorLength(Variable listParam))),
@@ -1002,7 +1002,7 @@ type private Resolver
                     let sourceName = { bracket with Type = Identifier; Lexeme = $"$source{i}" }
                     let indexN = { bracket with Type = Identifier; Lexeme = $"$index{i}" }
                     [ VarStmt(sourceName, Some source, false)
-                      VarStmt(indexN, Some(Literal(NumberValue 0.0)), true)
+                      VarStmt(indexN, Some(Literal(IntValue 0I)), true)
                       ForStmt(
                           None,
                           Some(Binary(Variable indexN, lessOp, InternalVectorLength(Variable sourceName))),
@@ -1019,7 +1019,7 @@ type private Resolver
                   Parameters = [ sourceParam ]
                   Body =
                     [ VarStmt(resultName, Some(Vector []), false)
-                      VarStmt(indexName, Some(Literal(NumberValue 0.0)), true)
+                      VarStmt(indexName, Some(Literal(IntValue 0I)), true)
                       ForStmt(
                           None,
                           Some(Binary(Variable indexName, lessOp, InternalVectorLength(Variable sourceParam))),

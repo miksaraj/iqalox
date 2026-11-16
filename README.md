@@ -56,11 +56,21 @@ references. You'll find the **syntax grammar** in `langspec/`; the
 
 ## Lexical Grammar ##
 
-    NUMBER          → DIGIT+ ( "." DIGIT+ )? ;
+    NUMBER          → INTEGER | FLOAT ;
+    INTEGER         → DIGITS
+                    | "0" ( "x" | "X" ) ( HEXDIGIT | "_" )+
+                    | "0" ( "b" | "B" ) ( "0" | "1" | "_" )+
+                    | "0" ( "o" | "O" ) ( "0" ... "7" | "_" )+ ;
+    FLOAT           → DIGITS "." DIGITS? EXPONENT?
+                    | "." DIGITS EXPONENT?
+                    | DIGITS EXPONENT ;
+    EXPONENT        → ( "e" | "E" ) ( "+" | "-" )? DIGITS ;
+    DIGITS          → DIGIT ( DIGIT | "_" )* ;
     STRING          → '"' <any char except '"'>* '"' | "'" <any char except "'">* "'" ;
     IDENTIFIER      → ALPHA ( ALPHA | DIGIT )* ;
     ALPHA           → 'a' ... 'z' | 'A' ... 'Z' | '_' ;
     DIGIT           → '0' ... '9' ;
+    HEXDIGIT        → DIGIT | 'a' ... 'f' | 'A' ... 'F' ;
     
 
 ## Precedence Rules ##

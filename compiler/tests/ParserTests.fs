@@ -189,8 +189,8 @@ let ``a bare identifier is not a call`` () =
 [<Fact>]
 let ``single-arg call needs no parens`` () =
     match singleExpr "f 1" with
-    | Call(_, [ Literal(NumberValue 1.0) ]) -> ()
-    | e -> failwith $"expected Call with one NumberValue 1.0 argument, got %A{e}"
+    | Call(_, [ Literal(IntValue(Is 1I)) ]) -> ()
+    | e -> failwith $"expected Call with one IntValue 1I argument, got %A{e}"
 
 [<Fact>]
 let ``multi-arg call is comma-separated without wrapping parens`` () =
@@ -199,9 +199,9 @@ let ``multi-arg call is comma-separated without wrapping parens`` () =
         let values =
             arguments
             |> List.map (function
-                | Literal(NumberValue n) -> n
-                | e -> failwith $"expected NumberValue, got %A{e}")
-        Assert.Equal<float list>([ 1.0; 2.0; 3.0 ], values)
+                | Literal(IntValue n) -> n
+                | e -> failwith $"expected IntValue, got %A{e}")
+        Assert.Equal<bigint list>([ 1I; 2I; 3I ], values)
     | e -> failwith $"expected Call, got %A{e}"
 
 [<Fact>]
@@ -233,15 +233,15 @@ let ``vector literal with multiple elements`` () =
         let numbers =
             values
             |> List.map (function
-                | Literal(NumberValue n) -> n
-                | e -> failwith $"expected NumberValue, got %A{e}")
-        Assert.Equal<float list>([ 1.0; 2.0; 3.0 ], numbers)
+                | Literal(IntValue n) -> n
+                | e -> failwith $"expected IntValue, got %A{e}")
+        Assert.Equal<bigint list>([ 1I; 2I; 3I ], numbers)
     | e -> failwith $"expected Vector, got %A{e}"
 
 [<Fact>]
 let ``empty and single-element vector literals`` () =
     Assert.Equal(Vector [], singleExpr "[]")
-    Assert.Equal(Vector [ Literal(NumberValue 1.0) ], singleExpr "[1]")
+    Assert.Equal(Vector [ Literal(IntValue 1I) ], singleExpr "[1]")
 
 [<Fact>]
 let ``a vector literal parse error does not leave the comma operator disabled`` () =
@@ -404,7 +404,7 @@ let ``property call with zero args`` () =
 [<Fact>]
 let ``property call with args needs no parens`` () =
     match singleExpr "math.square 3" with
-    | Call(Get(_, name), [ Literal(NumberValue 3.0) ]) -> Assert.Equal("square", name.Lexeme)
+    | Call(Get(_, name), [ Literal(IntValue(Is 3I)) ]) -> Assert.Equal("square", name.Lexeme)
     | e -> failwith $"expected Call on a Get, got %A{e}"
 
 [<Fact>]
@@ -430,7 +430,7 @@ let ``self is an expression`` () =
 [<Fact>]
 let ``no-space bracket after an identifier is indexing`` () =
     match singleExpr "v[0]" with
-    | Index(Variable objName, Literal(NumberValue 0.0), _) -> Assert.Equal("v", objName.Lexeme)
+    | Index(Variable objName, Literal(IntValue(Is 0I)), _) -> Assert.Equal("v", objName.Lexeme)
     | e -> failwith $"expected Index, got %A{e}"
 
 [<Fact>]
@@ -438,34 +438,34 @@ let ``space before bracket after an identifier is still a vector-literal call ar
     // docs/PLAN-0.2.md decision 6's whitespace-adjacency resolution: this
     // must keep meaning exactly what it meant before indexing existed.
     match singleExpr "concat [1, 2]" with
-    | Call(Variable name, [ Vector [ Literal(NumberValue 1.0); Literal(NumberValue 2.0) ] ]) ->
+    | Call(Variable name, [ Vector [ Literal(IntValue(Is 1I)); Literal(IntValue(Is 2I)) ] ]) ->
         Assert.Equal("concat", name.Lexeme)
     | e -> failwith $"expected Call with a Vector argument, got %A{e}"
 
 [<Fact>]
 let ``chained indexing`` () =
     match singleExpr "grid[0][1]" with
-    | Index(Index(Variable objName, Literal(NumberValue 0.0), _), Literal(NumberValue 1.0), _) ->
+    | Index(Index(Variable objName, Literal(IntValue(Is 0I)), _), Literal(IntValue(Is 1I)), _) ->
         Assert.Equal("grid", objName.Lexeme)
     | e -> failwith $"expected nested Index, got %A{e}"
 
 [<Fact>]
 let ``indexing a zero-arg call result needs no extra parens`` () =
     match singleExpr "makeVector()[0]" with
-    | Index(Call(Variable name, []), Literal(NumberValue 0.0), _) -> Assert.Equal("makeVector", name.Lexeme)
+    | Index(Call(Variable name, []), Literal(IntValue(Is 0I)), _) -> Assert.Equal("makeVector", name.Lexeme)
     | e -> failwith $"expected Index over a Call, got %A{e}"
 
 [<Fact>]
 let ``no-space bracket after a property access is indexing, not a call`` () =
     match singleExpr "obj.method[0]" with
-    | Index(Get(_, name), Literal(NumberValue 0.0), _) -> Assert.Equal("method", name.Lexeme)
+    | Index(Get(_, name), Literal(IntValue(Is 0I)), _) -> Assert.Equal("method", name.Lexeme)
     | e -> failwith $"expected Index over a Get, got %A{e}"
 
 [<Fact>]
 let ``a negative index needs no new grammar -- it's ordinary indexing with a unary-minus expression`` () =
     // docs/PLAN-0.3.md decision 2.
     match singleExpr "v[-1]" with
-    | Index(Variable objName, Unary(operator, Literal(NumberValue 1.0)), _) ->
+    | Index(Variable objName, Unary(operator, Literal(IntValue(Is 1I))), _) ->
         Assert.Equal("v", objName.Lexeme)
         Assert.Equal(Minus, operator.Type)
     | e -> failwith $"expected Index over a Unary, got %A{e}"
@@ -474,20 +474,20 @@ let ``a negative index needs no new grammar -- it's ordinary indexing with a una
 let ``a colon inside brackets is a slice, both bounds present`` () =
     // docs/PLAN-0.3.md decision 3.
     match singleExpr "v[1:2]" with
-    | Slice(Variable objName, Some(Literal(NumberValue 1.0)), Some(Literal(NumberValue 2.0)), _) ->
+    | Slice(Variable objName, Some(Literal(IntValue(Is 1I))), Some(Literal(IntValue(Is 2I))), _) ->
         Assert.Equal("v", objName.Lexeme)
     | e -> failwith $"expected Slice with both bounds, got %A{e}"
 
 [<Fact>]
 let ``a slice's start bound may be omitted`` () =
     match singleExpr "v[:2]" with
-    | Slice(Variable _, None, Some(Literal(NumberValue 2.0)), _) -> ()
+    | Slice(Variable _, None, Some(Literal(IntValue(Is 2I))), _) -> ()
     | e -> failwith $"expected Slice with no start bound, got %A{e}"
 
 [<Fact>]
 let ``a slice's stop bound may be omitted`` () =
     match singleExpr "v[2:]" with
-    | Slice(Variable _, Some(Literal(NumberValue 2.0)), None, _) -> ()
+    | Slice(Variable _, Some(Literal(IntValue(Is 2I))), None, _) -> ()
     | e -> failwith $"expected Slice with no stop bound, got %A{e}"
 
 [<Fact>]
@@ -521,13 +521,13 @@ let ``assigning to a slice is a parse error`` () =
 [<Fact>]
 let ``space before bracket after a property access is still a vector-literal call argument`` () =
     match singleExpr "obj.method [0]" with
-    | Call(Get(_, name), [ Vector [ Literal(NumberValue 0.0) ] ]) -> Assert.Equal("method", name.Lexeme)
+    | Call(Get(_, name), [ Vector [ Literal(IntValue(Is 0I)) ] ]) -> Assert.Equal("method", name.Lexeme)
     | e -> failwith $"expected Call with a Vector argument, got %A{e}"
 
 [<Fact>]
 let ``indexing is a valid assignment target`` () =
     match singleExpr "v[0] = 1" with
-    | IndexSet(Variable objName, Literal(NumberValue 0.0), Literal(NumberValue 1.0), _) ->
+    | IndexSet(Variable objName, Literal(IntValue(Is 0I)), Literal(IntValue(Is 1I)), _) ->
         Assert.Equal("v", objName.Lexeme)
     | e -> failwith $"expected IndexSet, got %A{e}"
 
@@ -551,7 +551,7 @@ let ``a multi-parameter lambda parses both parameter names`` () =
 [<Fact>]
 let ``a zero-parameter lambda parses with an empty parameter list`` () =
     match singleExpr "() -> 1" with
-    | Lambda([], _, Literal(NumberValue 1.0)) -> ()
+    | Lambda([], _, Literal(IntValue(Is 1I))) -> ()
     | e -> failwith $"expected zero-parameter Lambda, got %A{e}"
 
 [<Fact>]
@@ -591,7 +591,7 @@ let ``a lambda argument in a non-last position does not swallow the arguments af
     // the lambda's unparenthesized body swallow `, v` entirely, leaving
     // `map` a 1-argument call. Fixed in Argument().
     match singleExpr "map (x) -> x * 2, v" with
-    | Call(Variable mapName, [ Lambda([ x ], _, Binary(Variable bodyX, _, Literal(NumberValue 2.0))); Variable vName ]) ->
+    | Call(Variable mapName, [ Lambda([ x ], _, Binary(Variable bodyX, _, Literal(IntValue(Is 2I)))); Variable vName ]) ->
         Assert.Equal("map", mapName.Lexeme)
         Assert.Equal("x", x.Lexeme)
         Assert.Equal("x", bodyX.Lexeme)
@@ -602,7 +602,7 @@ let ``a lambda argument in a non-last position does not swallow the arguments af
 let ``a three-argument call with a non-last lambda still parses all three arguments`` () =
     // The same bug, exercised with reduce's actual shape (fn, v, initial).
     match singleExpr "reduce (a, b) -> a + b, v, 0" with
-    | Call(Variable reduceName, [ Lambda([ a; b ], _, _); Variable vName; Literal(NumberValue 0.0) ]) ->
+    | Call(Variable reduceName, [ Lambda([ a; b ], _, _); Variable vName; Literal(IntValue(Is 0I)) ]) ->
         Assert.Equal("reduce", reduceName.Lexeme)
         Assert.Equal("a", a.Lexeme)
         Assert.Equal("b", b.Lexeme)
@@ -628,14 +628,14 @@ let ``a parenthesized comma expression inside a vector literal still works`` () 
     // Same fix, exercised inside `[...]`'s own comma-suppressed context --
     // Grouping's parens must re-enable the comma operator there too.
     match singleExpr "[(1, 2), 3]" with
-    | Vector [ Grouping(Binary(Literal(NumberValue 1.0), operator, Literal(NumberValue 2.0))); Literal(NumberValue 3.0) ] ->
+    | Vector [ Grouping(Binary(Literal(IntValue(Is 1I)), operator, Literal(IntValue(Is 2I)))); Literal(IntValue(Is 3I)) ] ->
         Assert.Equal(Comma, operator.Type)
     | e -> failwith $"expected a Vector with a grouped comma Binary first element, got %A{e}"
 
 [<Fact>]
 let ``a bare vertical bar with no generator marker is a cons`` () =
     match singleExpr "[1 | xs]" with
-    | Cons(Literal(NumberValue 1.0), Variable list_, _) -> Assert.Equal("xs", list_.Lexeme)
+    | Cons(Literal(IntValue(Is 1I)), Variable list_, _) -> Assert.Equal("xs", list_.Lexeme)
     | e -> failwith $"expected Cons, got %A{e}"
 
 [<Fact>]
@@ -668,7 +668,7 @@ let ``an identifier immediately after the bar without an arrow is still a cons, 
 [<Fact>]
 let ``cons can nest to build up a list from multiple items`` () =
     match singleExpr "[1 | [2 | []]]" with
-    | Cons(Literal(NumberValue 1.0), Cons(Literal(NumberValue 2.0), Vector [], _), _) -> ()
+    | Cons(Literal(IntValue(Is 1I)), Cons(Literal(IntValue(Is 2I)), Vector [], _), _) -> ()
     | e -> failwith $"expected nested Cons, got %A{e}"
 
 [<Fact>]
@@ -712,7 +712,7 @@ let ``a spread element parses as Spread wrapping the inner expression`` () =
 [<Fact>]
 let ``spread can be mixed with plain elements in any position`` () =
     match singleExpr "[0, ...a, 2.5, ...b, 5]" with
-    | Vector [ Literal(NumberValue 0.0); Spread(Variable a, _); Literal(NumberValue 2.5); Spread(Variable b, _); Literal(NumberValue 5.0) ] ->
+    | Vector [ Literal(IntValue(Is 0I)); Spread(Variable a, _); Literal(FloatValue 2.5); Spread(Variable b, _); Literal(IntValue(Is 5I)) ] ->
         Assert.Equal("a", a.Lexeme)
         Assert.Equal("b", b.Lexeme)
     | e -> failwith $"expected Vector with alternating plain/Spread elements, got %A{e}"

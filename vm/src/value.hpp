@@ -15,7 +15,11 @@ struct UndefTag {};
 
 // A tagged union to start, per docs/PLAN-0.1.md's Phase 6 scope --
 // NaN-boxing is a later optimization, not required here.
-using Value = std::variant<std::monostate, UndefTag, bool, double, Obj*>;
+//
+// Numbers (docs/PLAN-0.4.md Phase 1): an exact integer that fits in 64 bits
+// is the inline `int64_t`; a larger one is a heap `ObjBigInt` (the `Obj*`
+// case); a float is the `double`. See numeric.hpp for the arithmetic.
+using Value = std::variant<std::monostate, UndefTag, bool, int64_t, double, Obj*>;
 
 inline const Value NilValue{};
 inline const Value UndefValue{UndefTag{}};
@@ -23,15 +27,18 @@ inline const Value UndefValue{UndefTag{}};
 inline bool isNil(const Value& v) { return std::holds_alternative<std::monostate>(v); }
 inline bool isUndef(const Value& v) { return std::holds_alternative<UndefTag>(v); }
 inline bool isBool(const Value& v) { return std::holds_alternative<bool>(v); }
-inline bool isNumber(const Value& v) { return std::holds_alternative<double>(v); }
+inline bool isSmallInt(const Value& v) { return std::holds_alternative<int64_t>(v); }
+inline bool isDouble(const Value& v) { return std::holds_alternative<double>(v); }
 inline bool isObj(const Value& v) { return std::holds_alternative<Obj*>(v); }
 
 inline bool asBool(const Value& v) { return std::get<bool>(v); }
-inline double asNumber(const Value& v) { return std::get<double>(v); }
+inline int64_t asSmallInt(const Value& v) { return std::get<int64_t>(v); }
+inline double asDouble(const Value& v) { return std::get<double>(v); }
 inline Obj* asObj(const Value& v) { return std::get<Obj*>(v); }
 
 inline Value boolValue(bool b) { return Value{b}; }
-inline Value numberValue(double n) { return Value{n}; }
+inline Value smallIntValue(int64_t n) { return Value{n}; }
+inline Value doubleValue(double n) { return Value{n}; }
 inline Value objValue(Obj* o) { return Value{o}; }
 
 // Lox/Iqalox truthiness: only `nil` and `false` are falsy -- 0, "", and
@@ -39,7 +46,8 @@ inline Value objValue(Obj* o) { return Value{o}; }
 // `is_truthy`.
 bool isTruthy(const Value& v);
 
-// `==`/`!=` structural equality: numbers/bools by value, strings by
+// `==`/`!=` structural equality: numbers/bools by value (an int never
+// equals a float, docs/PLAN-0.4.md decision 7), strings by
 // content, vectors element-wise and recursively, everything else
 // (functions, closures) by identity -- mirrors Python's default `==`,
 // which is all `poc`'s `is_equal` (`return a == b`) actually relies on.

@@ -23,7 +23,7 @@ let private compileSource (source: string) : Chunk =
 let ``a bare literal expression statement pushes, pops, then implicitly returns nil`` () =
     let chunk = compileSource "1"
     Assert.Equal<Instruction[]>([| Constant 0; Pop; Nil; Return |], chunk.Code)
-    Assert.Equal<Constant[]>([| NumberConstant 1.0 |], chunk.Constants)
+    Assert.Equal<Constant[]>([| IntConstant 1I |], chunk.Constants)
 
 [<Fact>]
 let ``each instruction's Lines entry matches the source line it came from`` () =
@@ -44,7 +44,7 @@ let ``each instruction's Lines entry matches the source line it came from`` () =
 let ``a global var declares via DefineGlobal and reads back via GetGlobal`` () =
     let chunk = compileSource "var x = 1\nx"
     Assert.Equal<Instruction[]>([| Constant 0; DefineGlobal 1; GetGlobal 1; Pop; Nil; Return |], chunk.Code)
-    Assert.Equal<Constant[]>([| NumberConstant 1.0; StringConstant "x" |], chunk.Constants)
+    Assert.Equal<Constant[]>([| IntConstant 1I; StringConstant "x" |], chunk.Constants)
 
 [<Fact>]
 let ``a local var needs no store instruction, and a block cleans its own slots up with PopN`` () =
@@ -55,7 +55,7 @@ let ``a local var needs no store instruction, and a block cleans its own slots u
 let ``the comma operator evaluates and discards the left side, fixing poc's always-nil bug`` () =
     let chunk = compileSource "(1, 2)"
     Assert.Equal<Instruction[]>([| Constant 0; Pop; Constant 1; Pop; Nil; Return |], chunk.Code)
-    Assert.Equal<Constant[]>([| NumberConstant 1.0; NumberConstant 2.0 |], chunk.Constants)
+    Assert.Equal<Constant[]>([| IntConstant 1I; IntConstant 2I |], chunk.Constants)
 
 [<Fact>]
 let ``?? short-circuits via JumpIfNotNil instead of always evaluating both sides`` () =
@@ -72,7 +72,7 @@ let ``elvis evaluates its condition exactly once, fixing poc's double-evaluation
         [| Constant 0; JumpIfFalse 3; Jump 5; Pop; Constant 1; Pop; Nil; Return |],
         chunk.Code
     )
-    Assert.Equal<Constant[]>([| NumberConstant 1.0; NumberConstant 2.0 |], chunk.Constants)
+    Assert.Equal<Constant[]>([| IntConstant 1I; IntConstant 2I |], chunk.Constants)
 
 [<Fact>]
 let ``a full ternary evaluates its condition once and branches to exactly one arm`` () =
@@ -110,6 +110,8 @@ let ``prefix increment reads, adds one, and stores back, leaving the new value o
            Return |],
         chunk.Code
     )
+    // An int 1 (docs/PLAN-0.4.md Phase 1): `++` keeps an int an int.
+    Assert.Equal<Constant[]>([| IntConstant 1I |], chunk.Constants)
 
 [<Fact>]
 let ``a for loop's condition-false exit and a break both unwind to the same depth without double-popping`` () =
@@ -135,7 +137,7 @@ let ``a for loop's condition-false exit and a break both unwind to the same dept
            Return |],
         chunk.Code
     )
-    Assert.Equal<Constant[]>([| NumberConstant 0.0; NumberConstant 3.0; NumberConstant 1.0 |], chunk.Constants)
+    Assert.Equal<Constant[]>([| IntConstant 0I; IntConstant 3I; IntConstant 1I |], chunk.Constants)
 
 [<Fact>]
 let ``break jumps past the loop's own condition-false cleanup, popping its own way out inline instead`` () =
@@ -365,7 +367,7 @@ let ``indexing pushes obj and index, then emits GetIndex with no operand`` () =
         chunk.Code
     )
     Assert.Equal<Constant[]>(
-        [| NumberConstant 1.0; NumberConstant 2.0; StringConstant "v"; NumberConstant 0.0 |],
+        [| IntConstant 1I; IntConstant 2I; StringConstant "v"; IntConstant 0I |],
         chunk.Constants
     )
 
@@ -392,7 +394,7 @@ let ``a slice with both bounds pushes obj, start, and stop, then emits GetSlice`
         chunk.Code
     )
     Assert.Equal<Constant[]>(
-        [| NumberConstant 1.0; NumberConstant 2.0; NumberConstant 3.0; StringConstant "v" |],
+        [| IntConstant 1I; IntConstant 2I; IntConstant 3I; StringConstant "v" |],
         chunk.Constants
     )
 
@@ -433,7 +435,7 @@ let ``indexed assignment pushes obj, index, and value, then emits SetIndex with 
         chunk.Code
     )
     Assert.Equal<Constant[]>(
-        [| NumberConstant 1.0; NumberConstant 2.0; StringConstant "v"; NumberConstant 0.0; NumberConstant 9.0 |],
+        [| IntConstant 1I; IntConstant 2I; StringConstant "v"; IntConstant 0I; IntConstant 9I |],
         chunk.Constants
     )
 
@@ -664,7 +666,7 @@ let ``a vector literal with a spread element flattens purely on the stack via Bu
         chunk.Code
     )
     Assert.Equal<Constant[]>(
-        [| NumberConstant 0.0; StringConstant "a"; NumberConstant 5.0 |],
+        [| IntConstant 0I; StringConstant "a"; IntConstant 5I |],
         chunk.Constants
     )
 

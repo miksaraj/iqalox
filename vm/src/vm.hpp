@@ -1,5 +1,6 @@
 #pragma once
 
+#include <compare>
 #include <cstdint>
 #include <deque>
 #include <stdexcept>
@@ -7,8 +8,16 @@
 #include <unordered_map>
 #include <vector>
 
+#include "bytecode.hpp"
+#include "numeric.hpp"
 #include "object.hpp"
 #include "value.hpp"
+
+#if defined(_MSC_VER)
+#define IQALOX_NOINLINE __declspec(noinline)
+#else
+#define IQALOX_NOINLINE [[gnu::noinline]]
+#endif
 
 namespace iqalox {
 
@@ -123,6 +132,26 @@ public:
         return obj;
     }
 
+    // Keeps a value a native is still building (or an intermediate result)
+    // reachable while it allocates more: a native's own locals aren't GC
+    // roots, only the VM stack, globals and these are. Strictly LIFO.
+    class TempRoot {
+    public:
+        explicit TempRoot(Vm& vm, Value value = NilValue) : vm_(vm), slot_(vm.tempRoots.size()) {
+            vm.tempRoots.push_back(value);
+        }
+        ~TempRoot() { vm_.tempRoots.pop_back(); }
+        TempRoot(const TempRoot&) = delete;
+        TempRoot& operator=(const TempRoot&) = delete;
+
+        const Value& get() const { return vm_.tempRoots[slot_]; }
+        void set(const Value& value) { vm_.tempRoots[slot_] = value; }
+
+    private:
+        Vm& vm_;
+        size_t slot_;
+    };
+
     // When set, every single allocation triggers a full collection --
     // exercises the GC far more aggressively than the size-threshold
     // trigger normally would, to shake out rooting bugs in tests. Only
@@ -144,6 +173,7 @@ private:
     std::vector<CallFrame> frames;
     std::unordered_map<std::string, Value> globals;
     ObjUpvalue* openUpvalues = nullptr;
+    std::vector<Value> tempRoots;  // see TempRoot
 
     Obj* objects = nullptr;
     size_t bytesAllocated = 0;
@@ -175,8 +205,12 @@ private:
     // external access (unlike the `pub`/`mut` gate, which only external
     // access needs at all).
     void checkPropertyNotUndef(const Value& value, const std::string& propName);
-    void checkNumberOperand(const Value& value, const char* message);
-    void checkNumberOperands(const Value& a, const Value& b, const char* message);
+    // The general (non-fast-path) case of every arithmetic and ordering
+    // opcode: pushes `numeric::`'s result, re-raising a fault it reports
+    // through `runtimeError` so it carries `[file, line N]`. Kept out of
+    // line, and the only place with a `try`, so `run()`'s hot dispatch
+    // loop has no exception landing pads to slow it down.
+    IQALOX_NOINLINE void numericSlowPath(bytecode::OpCode op, const Value& a, const Value& b);
     // Shared by GetIndex/SetIndex. Validates `receiver` is a vector and
     // `indexValue` is an in-range integer index, returning the validated
     // (already from-the-end-translated) index. `docs/PLAN-0.3.md`

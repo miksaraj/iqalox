@@ -7,6 +7,11 @@
 > `git show 0.2.0:docs/LANGUAGE.md`). This file describes the current,
 > current version, and marks what is **new for `0.3`** on top of `0.2`'s
 > language. (At the `0.3` release it is `git show 0.3.0:docs/LANGUAGE.md`.)
+>
+> **`0.4` is being phased in** (`docs/PLAN-0.4.md`): sections it has
+> already changed are marked **new for `0.4`**, starting with the numeric
+> model (exact integers next to floats, [§2](#2-lexical-structure),
+> [§3](#3-values-and-types), [§5](#5-operators-and-precedence)).
 
 This is the complete reference for Iqalox `0.3` — `0.2`'s language plus
 the `0.3` additions (each marked "new for `0.3`") — implemented as a
@@ -214,18 +219,43 @@ something imports them; the one name available without an import is
 ## 2. Lexical structure
 
 ```
-NUMBER      → DIGIT+ ( "." DIGIT+ )?
+NUMBER      → INTEGER | FLOAT
+INTEGER     → DIGITS
+            | "0" ( "x" | "X" ) ( HEXDIGIT | "_" )+
+            | "0" ( "b" | "B" ) ( "0" | "1" | "_" )+
+            | "0" ( "o" | "O" ) ( "0"..."7" | "_" )+
+FLOAT       → DIGITS "." DIGITS? EXPONENT?
+            | "." DIGITS EXPONENT?
+            | DIGITS EXPONENT
+EXPONENT    → ( "e" | "E" ) ( "+" | "-" )? DIGITS
+DIGITS      → DIGIT ( DIGIT | "_" )*
 STRING      → '"' <any char except '"'>* '"' | "'" <any char except "'">* "'"
 IDENTIFIER  → ALPHA ( ALPHA | DIGIT )*
 ALPHA       → 'a'...'z' | 'A'...'Z' | '_'
 DIGIT       → '0'...'9'
 ```
 
-- **Numbers** are always floating-point — there is no separate integer
-  type (`5` and `5.0` are the same value). Printing drops a trailing `.0`, so `print 5` prints `5`, not `5.0` (see
-  [§13](#13-the-standard-library)). The same rule applies to each element
-  of a printed vector: `print [1, "a"]` prints `[1, a]` (no `.0`, strings
-  unquoted).
+- **Numbers** (new for `0.4`) are either **integers** or **floats**,
+  and the literal says which: a decimal point or an exponent makes a
+  float, anything else is an integer.
+  - Integers: `42`, `0xFF` / `0XFF` (hex), `0b1010` (binary), `0o17`
+    (octal). They are exact and can be any size (up to the limit in
+    [§3](#3-values-and-types)).
+  - Floats: `3.14`, `.5`, `1.`, `1e9`, `2.5e-3`, `1.e5`. An exponent
+    always makes a float, even with no decimal point.
+  - `_` separates digits anywhere inside a literal (`1_000_000`, `1__0`,
+    `0x_FF`), except at its end, next to the decimal point (`1_.5`,
+    `1._5`) or next to the exponent marker (`1_e5`, `1e_5`). Those are
+    compile-time errors, and so is a bad digit (`0b102`).
+  - A float literal too large for a double (`1e400`) is a compile-time
+    error; a too-small one (`1e-400`) is `0.0`.
+  - `.5` is a float only where a `.` couldn't be member access: `x.5`
+    (no space) is still `x` followed by `.5`-as-member, an error, while
+    `f .5` and `(.5)` are floats.
+  - Printing shows the type ([§13](#13-the-standard-library)): integers
+    print exactly (`5`), floats always with a decimal point (`5.0`,
+    `1.0e+16`). The same holds inside a printed vector: `print [1, 2.0,
+    "a"]` prints `[1, 2.0, a]` (strings unquoted).
 - **Strings** may use single or double quotes interchangeably. Escape
   sequences are processed inside string literals — `\n` `\t` `\r` `\\`
   `\'` `\"` `\0` are recognized; any other character after a backslash is
@@ -255,7 +285,8 @@ Iqalox has five kinds of user-visible runtime value:
 
 | Type | Literal syntax | Example |
 |---|---|---|
-| Number (always float) | digits, optional decimal point | `42`, `3.14` |
+| Integer (new for `0.4`) | digits, no decimal point | `42`, `0xFF`, `1_000` |
+| Float | decimal point or exponent | `3.14`, `.5`, `1e9` |
 | String | single- or double-quoted | `"hi"`, `'hi'` |
 | Boolean | `true` / `false` | `true` |
 | `nil` | `nil` | `nil` |
@@ -290,6 +321,52 @@ not an error. **Ordering** comparisons (`>`, `>=`, `<`, `<=`) and
 numbers and raise a runtime error otherwise — there is no string
 comparison or string `+` concatenation (use `concat`,
 [§13](#13-the-standard-library)).
+
+**Integers and floats (new for `0.4`, `docs/PLAN-0.4.md` decisions 1-9).**
+
+- **Integers are exact at any size.** `2 ^ 100` is
+  `1267650600228229401496703205376`, and `9223372036854775807 + 1` doesn't
+  overflow.
+- **Size limit.** An integer result larger than 2^26 bits (about 20
+  million digits) is a runtime error, `Integer result too large.`; it is
+  refused before computing, never an out-of-memory crash.
+- **`==` compares type and value.** An integer never equals a float:
+  `1 == 1.0` is `false`.
+  - Floats follow IEEE: `nan == nan` is `false`, `0.0 == -0.0` is
+    `true`.
+- **Ordering compares exact values across both kinds, never rounding.**
+  - So `1 <= 1.0` and `1 >= 1.0` are both `true` even though `1 == 1.0`
+    is `false`. This is a deliberate, documented consequence of the two
+    rules above.
+  - `2 ^ 53 + 1 > 9007199254740992.0` is `true`, though converting the
+    integer to a float would round it to equal.
+  - Every ordering involving `nan` is `false`.
+- **Mixing an integer and a float in arithmetic gives a float**
+  (`1 + 2.5 == 3.5`). An integer too large for a float makes this a
+  runtime error, `Integer too large to convert to float.`, rather than a
+  silent `inf`.
+- **`/` always gives a float**, even for two integers: `7 / 2 == 3.5`,
+  `6 / 2 == 3.0`.
+  - On two integers it is computed exactly and rounded once, so
+    `(2 ^ 2000) / (2 ^ 1999) == 2.0` though neither operand fits in a
+    float.
+  - A result beyond the float range is `Result too large to represent as
+    a float.`
+- **`%`** gives an integer for two integers and a float otherwise. Its
+  result always takes the divisor's sign: `-7 % 2 == 1`, `7.5 % 2 ==
+  1.5`.
+- **`^` on two integers** follows the exponent's sign.
+  - A non-negative exponent gives an exact integer (`0 ^ 0 == 1`).
+  - A negative one gives a float, computed exactly and rounded once:
+    `2 ^ -1 == 0.5`, and `(2 ^ 2000) ^ -1 == 0.0` rather than an error.
+  - Any float operand gives a float.
+- **Integer division `//`** arrives later in `0.4` (`docs/PLAN-0.4.md`
+  Phase 2).
+- **Division by an integer zero** (`1 / 0`, `1 % 0`, `0 ^ -1`) is
+  currently a runtime error, `Division by zero.`, and so is division by
+  a float zero. A later `0.4` phase makes the integer case a
+  compile-time check and lets a float zero divisor give `inf`/`nan`
+  (`docs/PLAN-0.4.md` decision 12).
 
 **New for `0.2`**: vectors are no longer literals-only data. `[1, 2, 3]`
 still produces a value the same way it always has, but that value now
@@ -373,9 +450,9 @@ root `README.md` for the same chain presented tightest-first):
 | `or` | logical or | short-circuits |
 | `and` | logical and | short-circuits |
 | `==` `!=` | equality | never raises |
-| `>` `>=` `<` `<=` | comparison | numbers only |
+| `>` `>=` `<` `<=` | comparison | numbers only; exact across ints and floats |
 | `-` `+` | additive | numbers only, no string concat |
-| `/` `*` `%` `^` | multiplicative | includes modulo and power, numbers only |
+| `/` `*` `%` `^` | multiplicative | includes modulo and power, numbers only; `/` always gives a float |
 | `++` `--` | prefix increment/decrement | mutating, target must be a variable |
 | `!` `-` | unary not / negate | |
 
@@ -583,9 +660,10 @@ itself takes an argument binds to the argument, not the outer call — see
 space, disambiguated by whitespace.** `v[0]` (no space before `[`) reads
 as postfix indexing on `v`; `f [0]` (a space before `[`) reads as the
 pre-existing call form — `f` called with the vector literal `[0]` as its
-sole argument, exactly as `concat [1, 2]` above already does. This is the
-only place whitespace is significant anywhere in Iqalox's grammar — see
-[§9](#9-vectors-indexing-cons-comprehensions-and-spread).
+sole argument, exactly as `concat [1, 2]` above already does. See
+[§9](#9-vectors-indexing-cons-comprehensions-and-spread). (New for `0.4`,
+whitespace also decides whether `.5` is a float: `f .5` passes one, `x.5`
+is member access, [§2](#2-lexical-structure).)
 
 ## 9. Vectors: indexing, cons, comprehensions, and spread
 
@@ -607,6 +685,10 @@ print v[1]        # 99
 - 0-based, **bounds-checked** — reading or writing past either end of the
   vector is a runtime error (`Vector index N out of range.`), not
   silently `nil` or a resize.
+- **New for `0.4`: only an integer indexes.** `v[1.0]` is a runtime error
+  (`Vector index must be an integer, got float.`) even though `1.0` is
+  whole, and slice bounds follow the same rule. This catches a `/`
+  result (always a float) used as an index by accident.
 - Indexing composes with anything that produces a vector, including a
   call's own result, and nests for matrix-style access:
 
@@ -1074,7 +1156,8 @@ The modules:
 ### Core
 
 - **`print value`** — stringifies `value` (see [§3](#3-values-and-types)'s
-  stringification rules: `nil` → `nil`, floats drop a trailing `.0`,
+  stringification rules: `nil` → `nil`, integers exactly, floats always
+  with a decimal point (`5.0`, `1.0e+16`; new for `0.4`),
   booleans lowercase; a vector prints as `[e1, e2, ...]` with each element
   stringified the same way) and writes it followed by a newline. Returns `nil`.
   Always available, no import needed.
@@ -1089,7 +1172,7 @@ storage and never call back into user code:
   Returns `nil`.
 - **`pop vector`** — removes and returns the last element of `vector`
   **in place**. A runtime error on an empty vector.
-- **`length vector`** — returns the element count as a number.
+- **`length vector`** — returns the element count as an integer.
 - **`reverse vector`** — returns a **new** vector with elements in
   reverse order; does not mutate the original.
 - **`concat vector`** — stringifies every element of `vector` and joins
@@ -1378,6 +1461,17 @@ for the full history of how each was arrived at.
     when the trait is used from another module. (A `pub class`'s methods
     don't have this problem — they stay compiled in their own module.)
     See [§17](#17-modules-and-imports-new-for-03).
+13. **Very large integers are slow (new for `0.4`).**
+    - **Speed.** Big integer arithmetic uses mini-gmp, GMP's compact
+      subset (`vm/third_party/mini-gmp/`). It is designed for numbers up
+      to a few hundred bits and has no fast multiplication or division
+      for larger ones. Squaring a 1.6-million-bit integer takes about
+      2 s (Python: about 0.2 s), and printing a 50,000-digit number about
+      0.6 s.
+    - **Typical use is unaffected.** Integers that fit in 64 bits never
+      touch mini-gmp.
+    - **Raising the ceiling** would mean swapping in full GMP, which has
+      the same API; that is `1.2`'s performance work, not committed.
 
 The following limitations from earlier versions are **resolved**:
 vectors being literal-only with no indexing/mutation/length (now fixed as

@@ -45,11 +45,15 @@ import random, sys, os
 random.seed(20260101)
 out = sys.argv[1]; os.makedirs(out)
 ops = ['+','-','*','/','%','^','<','<=','>','>=','==','!=','and','or','??']
-atoms = ['0','1','2','3','7','0.5','100','true','false','nil','"a"','"b"']
+# Integers and floats side by side (docs/PLAN-0.4.md Phase 1), including an
+# int just past 2^53 and one past 64 bits, where folding must defer to the VM.
+atoms = ['0','1','2','3','7','0.5','100','true','false','nil','"a"','"b"',
+         '2.0','.25','1e300','9007199254740993','18446744073709551616']
 def expr(d):
     if d == 0 or random.random() < 0.25: return random.choice(atoms)
     r = random.random()
     if r < 0.1: return '(!' + expr(d-1) + ')'
+    if r < 0.15: return '(-' + expr(d-1) + ')'
     if r < 0.2: return '((' + expr(d-1) + ') ? (' + expr(d-1) + ') : (' + expr(d-1) + '))'
     return '(' + expr(d-1) + ' ' + random.choice(ops) + ' ' + expr(d-1) + ')'
 for i in range(60):

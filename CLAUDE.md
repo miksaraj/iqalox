@@ -418,7 +418,7 @@ own `sort`/`push` can never clobber a native in the VM's flat global table.
 
 ## Architecture (`compiler/` + `vm/`, 0.4)
 
-**In progress: Phase 0 (dependency plumbing) has landed.** See `docs/PLAN-0.4.md`. Its §1 records 29
+**In progress: Phases 0 (dependency plumbing) and 1 (the integer type) have landed.** See `docs/PLAN-0.4.md`. Its §1 records 29
 design decisions the repository owner settled before any code. **Treat them as
 decided; don't re-open them.** The handful still pending are listed in §2 and
 are to be asked when their phase starts. In outline:
@@ -453,6 +453,26 @@ Phase 0 wired both in:
   `iqaloxvm` and the tests link.
 - `iqaloxvm --version` reports both library versions.
 - Offline builds pass `-DFETCHCONTENT_SOURCE_DIR_ICU=<extracted icu/ dir>`.
+
+Phase 1 added the integer type:
+- **Compiler.** Literals are `IntLiteral`/`IntValue`/`IntConstant` (a
+  `bigint`) versus `FloatLiteral`/`FloatValue`/`FloatConstant`. Bytecode
+  format v4 encodes both integer sizes. Tests write an integer in a
+  pattern as `IntValue(Is 3I)`, since F# can't match on bigint literals
+  (`compiler/tests/TestHelpers.fs`).
+- **VM values.** `Value` holds an inline `int64_t` or, above 64 bits, an
+  `ObjBigInt`. The split is canonical: a big integer is never stored in
+  the big form if it fits in 64 bits.
+- **One home for arithmetic.** Every numeric rule lives in
+  `vm/src/numeric.cpp` (exact integers, exact-then-round `/` and negative
+  `^`, exact mixed comparison, the 2^26-bit size limit). Don't duplicate
+  it in the opcodes.
+- **GC rooting in natives.** A native that allocates while holding
+  values it built itself must keep them reachable with `Vm::TempRoot`.
+  Its own locals are not GC roots.
+- **Keep `try` out of `Vm::run()`.** Arithmetic's slow paths go through
+  the out-of-line `Vm::numericSlowPath`. An inline `try` in the dispatch
+  loop once cost 30-60% on every benchmark (`docs/PLAN-0.4.md` Phase 1).
 
 ## Engineering conventions
 
