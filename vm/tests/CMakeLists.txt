@@ -5,14 +5,10 @@ add_executable(iqaloxvm_tests
     test_vm.cpp
     test_value.cpp
     test_classes.cpp
-    ../src/bytecode.cpp
-    ../src/value.cpp
-    ../src/vm.cpp
-    ../src/natives.cpp
+    test_dependencies.cpp
 )
 
-target_include_directories(iqaloxvm_tests PRIVATE ../src)
-target_link_libraries(iqaloxvm_tests PRIVATE Catch2::Catch2WithMain)
+target_link_libraries(iqaloxvm_tests PRIVATE iqaloxvm_core Catch2::Catch2WithMain)
 
 include(CTest)
 include(Catch)

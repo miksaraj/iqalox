@@ -377,7 +377,24 @@ the repository owner when its phase starts, the way `0.3`'s open question
      not specified identically across standard libraries.
    - **Regex backtracking**: patterns run with ICU's `uregex_setTimeLimit`
      guard.
-   - **ICU linking per platform**: decided in Phase 0.
+   - **ICU linking per platform**: settled in Phase 0. ICU is built from
+     source with CMake and linked statically on all three platforms, with
+     no data file (see Phase 0 in §5).
+5. **Three regex features need ICU data that Phase 0's build leaves out:**
+   - `\X` (grapheme clusters, which needs break iteration);
+   - `\N{LATIN SMALL LETTER A}` (character names);
+   - the emoji and layout properties (`\p{Emoji}`, `\p{InPC}`).
+
+   They currently fail to compile as patterns, and
+   `vm/tests/test_dependencies.cpp` pins that. Decision 28 chose ICU's
+   syntax but didn't say whether every ICU feature must work, so this is
+   to be put to the owner at Phase 7 start:
+   - **Leave them out** and document them as unsupported. This is the
+     current state and costs nothing.
+   - **Add them back** by building a small custom data package with only
+     the needed pieces, rather than ICU's 32 MB data file. Character
+     names are about 340 KB, emoji properties about 16 KB, and `\X`
+     needs break iteration switched back on plus its rules data.
 
 ## 3. Grammar and architecture additions (overview)
 
@@ -468,19 +485,93 @@ first because nearly everything later depends on it (indices, `length`,
 `std.math`, constant folding). The new ICU dependency is de-risked in its
 own phase before any feature relies on it.
 
-**Phase 0 — Dependency plumbing.** No language change. Vendor mini-gmp
-under `vm/third_party/`, and wire ICU into `vm/CMakeLists.txt`, CI
-(`.github/workflows/ci.yml`) and all three release builds
-(`.github/workflows/release.yml`).
-- Choose static vs. shared linking per platform, and trim ICU's data
-  file to the pieces used (case mapping, character properties, regex),
-  so the release bundle doesn't grow by the full ~30 MB data library.
-- Prove it with a throwaway native round-trip test on Linux, macOS and
-  Windows.
-- Every new `uses:` step is SHA-pinned (`CLAUDE.md`).
+**Phase 0 — Dependency plumbing — done on Linux; macOS and Windows
+pending their first CI run.** No language change.
 
-If this turns out larger than expected, raise it before Phase 4, which is
-the first phase that needs ICU.
+*mini-gmp* is vendored unmodified from GMP 6.3.0 in
+`vm/third_party/mini-gmp/`. `README.iqalox.md` there records the file
+hashes and the license choice (LGPL v3+).
+
+*ICU 78.3* (Unicode 17) comes in through `vm/cmake/IqaloxIcu.cmake`:
+- `FetchContent` downloads upstream's release tarball, as mirrored by the
+  Ubuntu archive, and refuses it unless its SHA-256 matches the pinned
+  one.
+- CMake builds ICU's `common` and `i18n` libraries as two static
+  libraries, listing the sources from ICU's own per-library
+  `sources.txt`.
+- **One build path for all three platforms.** ICU's own build is
+  autotools on Unix and Visual Studio projects on Windows; driving it
+  from CMake avoids that split. The release binary needs no ICU installed
+  on the user's machine.
+
+The data question, which this phase existed to answer, came out simpler
+than planned:
+- **ICU's 32 MB data file isn't trimmed; it isn't linked at all.** ICU's
+  empty `stubdata` library stands in for it.
+- ICU compiles its general character properties, full case mapping
+  (including one-to-many mappings such as `ß` → `SS`), property names,
+  bidi and NFC tables into its code. That is everything decisions 21, 24
+  and 28 need.
+- The rest is switched off with ICU's `UCONFIG_NO_*` switches: legacy
+  converters, formatting, collation, transliteration, break iteration,
+  IDNA, services and file-based data loading. Most of ICU then compiles
+  to nothing.
+- Three regex features need data and are left out for now (§2 item 5).
+
+`vm/tests/test_dependencies.cpp` (9 cases, 77 assertions) pins this
+configuration down. It covers:
+- mini-gmp: exact arithmetic past 64 bits, detecting when a result fits
+  back in 64 bits, floored division, and infinite two's-complement
+  bitwise operations;
+- ICU case mapping under the root locale;
+- character classes;
+- regex: Unicode properties, scripts, lookahead and full case folding
+  under `(?i)`;
+- match positions converted from UTF-8 byte offsets to code points across
+  non-BMP characters;
+- the three unsupported patterns failing.
+
+The plan called for a throwaway test; it is kept instead, so an ICU or
+mini-gmp upgrade can't change behaviour silently.
+
+`iqaloxvm --version` reports both library versions. It is the cheapest
+way to prove the libraries are linked into the shipped binary itself, not
+only into the test suite.
+
+Measured on Linux:
+
+| Measurement | Result |
+|---|---|
+| ICU build time (8 jobs) | ~25 s |
+| Release `iqaloxvm` size | 192 KB → 479 KB (only `--version` uses ICU so far) |
+| Stripped binary using regex + case mapping + character properties | ~1.4 MB, the realistic size once Phases 6-7 land |
+| ICU data file the stub approach avoids | 32 MB |
+
+Verified:
+- every `langspec/examples/*.iqx` gives byte-identical output and exit
+  codes on `main`'s VM and on the new Debug and Release VMs;
+- the full Catch2 suite passes under GCC 13 and Clang 18;
+- a clean configure downloads and verifies the tarball.
+
+Build, CI and release changes:
+- `vm/CMakeLists.txt` now builds an `iqaloxvm_core` library that both
+  `iqaloxvm` and the tests link, instead of the tests recompiling
+  `src/*.cpp`.
+- It compiles with `/utf-8` on MSVC (UTF-8 literals in the tests) and
+  needs CMake 3.24.
+- It collects ICU's and mini-gmp's license texts into
+  `third-party-licenses/` in the build directory. `release.yml` ships
+  that directory, which static linking requires.
+- CI's `vm/` job is now a Linux/macOS/Windows matrix, with Catch2 from
+  apt, Homebrew and vcpkg.
+- A new `vm-release` matrix job builds `iqaloxvm` exactly as `release.yml`
+  does and runs `scripts/vm-release-smoke-test.sh`, which `release.yml`
+  also runs. The script checks:
+  - the binary reports the pinned versions;
+  - ICU and GMP are not shared-library dependencies (`ldd`/`otool`);
+  - the license files are present.
+- No new actions were added; every `uses:` is one already SHA-pinned in
+  the repo.
 
 **Phase 1 — The integer type.** Decisions 1-3 and 5-9:
 - the scanner's literal forms;
@@ -586,12 +677,21 @@ On top of that, this version needs:
 ## 7. Risks
 
 - **ICU is the first heavyweight third-party dependency.** It has to build
-  and link on Linux, macOS and Windows, in CI and in `release.yml`. Its
-  default data library is large. Phase 0 exists to find this out before
-  anything depends on it. If static linking or data trimming proves
+  and link on Linux, macOS and Windows, in CI and in `release.yml`.
+  *Phase 0 update:* the data-size half of this risk is gone (no data file
+  is linked, about +1.4 MB in total), and Linux is proven. macOS (Apple
+  clang, libc++) and Windows (MSVC) have only been reasoned about, not
+  built; ICU's sources aren't routinely compiled by plain CMake on MSVC,
+  so that is where trouble is likeliest. If static linking proves
   impractical on a platform, raise it with the owner as a direct question
   laying out the real cost, the way `0.2` Phase 8's C3 scope check was
   raised, rather than quietly shipping a much bigger bundle.
+- **ICU's source tarball is fetched from the Ubuntu archive.** That is the
+  copy reachable from the environment Phase 0 was built in; GitHub
+  release downloads were blocked there. The pinned hash makes the host
+  irrelevant to integrity, but not to availability: if Ubuntu ever drops
+  the file, CMake fails and the URL needs updating to another host serving
+  the same bytes.
 - **The compile-time division check will reject a lot of existing code.**
   Every unguarded division by a parameter, a call result or a mutable
   variable becomes a compile error, in examples, `bench/` programs,

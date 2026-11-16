@@ -1,9 +1,16 @@
 #include <iostream>
+#include <string_view>
 
 #include "bytecode.hpp"
+#include "dependencies.hpp"
 #include "vm.hpp"
 
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view(argv[1]) == "--version") {
+        std::cout << "iqaloxvm (bytecode format v" << static_cast<int>(iqalox::bytecode::kFormatVersion) << "), "
+                  << iqalox::dependencyVersions() << "\n";
+        return 0;
+    }
     if (argc != 2) {
         std::cerr << "Usage: iqaloxvm <bytecode file>\n";
         return 64;

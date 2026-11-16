@@ -49,6 +49,12 @@ jobs:
       - name: Build iqaloxvm
         run: cmake --build vm/build --target iqaloxvm --config Release -j
 
+      # The same check CI's vm-release job runs: ICU and mini-gmp are linked
+      # in statically and their license files were collected.
+      - name: Smoke test iqaloxvm
+        shell: bash
+        run: scripts/vm-release-smoke-test.sh vm/build
+
       - name: Assemble and upload release archive (Linux/macOS)
         if: runner.os != 'Windows'
         shell: bash
@@ -64,6 +70,9 @@ jobs:
           cp vm/build/iqaloxvm "$name/"
           cp packaging/iqalox "$name/"
           cp README.md LICENSE "$name/"
+          # ICU and mini-gmp are linked into iqaloxvm statically; their
+          # licenses ship with it.
+          cp -r vm/build/third-party-licenses "$name/third-party-licenses"
           # The top-level langspec/examples/ is the current version's set,
           # including the multi-file modules/ example.
           cp -r langspec/examples "$name/examples"
@@ -85,6 +94,9 @@ jobs:
           Copy-Item vm/build/Release/iqaloxvm.exe "$name/"
           Copy-Item packaging/iqalox.cmd "$name/"
           Copy-Item README.md,LICENSE "$name/"
+          # ICU and mini-gmp are linked into iqaloxvm statically; their
+          # licenses ship with it.
+          Copy-Item -Recurse vm/build/third-party-licenses "$name/third-party-licenses"
           # The top-level langspec/examples/ is the current version's set,
           # including the multi-file modules/ example.
           Copy-Item -Recurse langspec/examples "$name/examples"
