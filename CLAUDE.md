@@ -418,7 +418,7 @@ own `sort`/`push` can never clobber a native in the VM's flat global table.
 
 ## Architecture (`compiler/` + `vm/`, 0.4)
 
-**Planned, no phases landed yet.** See `docs/PLAN-0.4.md`. Its §1 records 29
+**In progress: Phase 0 (dependency plumbing) has landed.** See `docs/PLAN-0.4.md`. Its §1 records 29
 design decisions the repository owner settled before any code. **Treat them as
 decided; don't re-open them.** The handful still pending are listed in §2 and
 are to be asked when their phase starts. In outline:
@@ -438,6 +438,21 @@ are to be asked when their phase starts. In outline:
 `vm/` gains its first heavyweight third-party dependency, **ICU** (case
 mapping, character properties, regex), plus a vendored mini-gmp for big
 integers. Bytecode moves to format v4.
+
+Phase 0 wired both in:
+- **ICU 78.3** is built from a SHA-256-pinned source tarball by
+  `vm/cmake/IqaloxIcu.cmake`, as two static libraries with **no data
+  file** (ICU's `stubdata`). Its `UCONFIG_NO_*` switches turn off what
+  Iqalox doesn't use. Don't call an ICU API that needs the data file
+  (break iteration, character names, emoji properties, locale data)
+  without first reading `docs/PLAN-0.4.md` §2 item 5.
+- **mini-gmp** is vendored unmodified in `vm/third_party/mini-gmp/`.
+- `vm/tests/test_dependencies.cpp` pins down what both libraries do in
+  this configuration.
+- The VM sources are built once as the `iqaloxvm_core` library, which both
+  `iqaloxvm` and the tests link.
+- `iqaloxvm --version` reports both library versions.
+- Offline builds pass `-DFETCHCONTENT_SOURCE_DIR_ICU=<extracted icu/ dir>`.
 
 ## Engineering conventions
 
@@ -500,7 +515,9 @@ don't relax it for convenience.
 
 Two workflows, two different jobs: `.github/workflows/ci.yml` runs on every
 push/PR (build + test both toolchains, plus `poc/`'s own standalone test
-suite — the cross-implementation conformance job and the 0.1-fixture smoke
+suite. Since `0.4` Phase 0, `vm/` is built and tested on Linux, macOS and
+Windows, and a `vm-release` job builds `iqaloxvm` exactly as `release.yml`
+does and runs `scripts/vm-release-smoke-test.sh` on it — the cross-implementation conformance job and the 0.1-fixture smoke
 test were both retired during `0.2` Phase 7, see the `compiler/`/`vm/`
 testing bullet above); `.github/workflows/release.yml` fires only when a
 GitHub Release is
@@ -511,7 +528,9 @@ tag first (same process the `0.1.x-poc` releases used) — this workflow's
 only job is producing the binaries, not the notes. `vm/CMakeLists.txt`'s
 `IQALOX_BUILD_TESTS` option (default `ON`) is what lets `release.yml`
 configure with `-DIQALOX_BUILD_TESTS=OFF`, so a release build of `iqaloxvm`
-needs no Catch2 dependency at all.
+needs no Catch2 dependency at all. Release bundles must include
+`vm/build/third-party-licenses/` (ICU's and mini-gmp's license texts), since
+both are linked statically.
 
 ## License
 

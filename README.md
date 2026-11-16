@@ -17,13 +17,13 @@ frozen, working reference implementation. Earlier versions are preserved by git 
 (`iqaloxc`, `iqaloxvm`), a one-command launcher (`iqalox`), and the example `.iqx` scripts, and needs nothing else installed.
 
 **Option 2: build from source.** You'll need the [.NET 10 SDK](https://dotnet.microsoft.com/download)
-and a C++23 compiler (GCC 13+ or Clang 18+) plus [CMake](https://cmake.org/) 3.20+:
+and a C++23 compiler (GCC 13+ or Clang 18+) plus [CMake](https://cmake.org/) 3.24+:
 
 ```sh
 # Build the compiler
 dotnet build compiler/src/Iqaloxc.fsproj
 
-# Build the VM
+# Build the VM (the first configure downloads ICU's source; see vm/README.md)
 cmake -S vm -B vm/build -DCMAKE_BUILD_TYPE=Release
 cmake --build vm/build --target iqaloxvm -j
 ```

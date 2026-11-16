@@ -12,19 +12,57 @@ permissions:
   contents: read
 
 jobs:
+  # vm/ links ICU and mini-gmp (docs/PLAN-0.4.md Phase 0), so it is built
+  # and tested on all three platforms the release workflow ships for, not
+  # only Linux. Configuring vm/ downloads ICU's pinned source tarball
+  # (vm/cmake/IqaloxIcu.cmake).
   vm:
-    name: vm/ (C++23)
-    runs-on: ubuntu-latest
+    name: vm/ (C++23, ${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-      - name: Install Catch2
+      - name: Install Catch2 (Linux)
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y catch2
+      - name: Install Catch2 (macOS)
+        if: runner.os == 'macOS'
+        run: brew install catch2
+      - name: Install Catch2 (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          vcpkg install catch2:x64-windows
+          "CMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" | Out-File -FilePath $env:GITHUB_ENV -Append
       - name: Configure
         run: cmake -S vm -B vm/build -DCMAKE_BUILD_TYPE=Debug
       - name: Build
-        run: cmake --build vm/build -j
+        run: cmake --build vm/build --config Debug -j
       - name: Test
-        run: ctest --test-dir vm/build --output-on-failure
+        run: ctest --test-dir vm/build -C Debug --output-on-failure
+
+  # Builds iqaloxvm exactly the way .github/workflows/release.yml does and
+  # checks the result, so the release path is proven on every PR rather
+  # than only when a release is published.
+  vm-release:
+    name: vm/ release build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Configure (Release, no test dependency)
+        run: cmake -S vm -B vm/build -DCMAKE_BUILD_TYPE=Release -DIQALOX_BUILD_TESTS=OFF
+      - name: Build iqaloxvm
+        run: cmake --build vm/build --target iqaloxvm --config Release -j
+      - name: Smoke test
+        shell: bash
+        run: scripts/vm-release-smoke-test.sh vm/build
 
   compiler:
     name: compiler/ (F#)

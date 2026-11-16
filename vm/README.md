@@ -23,6 +23,28 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build -j
 ```
 
+Needs CMake 3.24+ and a C++23 compiler. Tests also need Catch2 3 (off with
+`-DIQALOX_BUILD_TESTS=OFF`).
+
+### Third-party dependencies
+
+Both are linked statically, so `iqaloxvm` needs nothing installed to run.
+`build/third-party-licenses/` collects their license texts, which ship in
+release bundles.
+
+- **ICU 78.3** (Unicode case mapping, character properties, regex; from
+  `0.4`, `docs/PLAN-0.4.md` decisions 21 and 28). `cmake/IqaloxIcu.cmake`
+  downloads ICU's source tarball the first time you configure, checks it
+  against a pinned SHA-256, and builds it with CMake. It uses no ICU data
+  file (about 32 MB); everything Iqalox uses runs on tables compiled into ICU
+  itself. `tests/test_dependencies.cpp` pins down what that does and doesn't
+  cover. To build offline, extract the tarball yourself and configure with
+  `-DFETCHCONTENT_SOURCE_DIR_ICU=<the extracted icu/ directory>`.
+- **mini-gmp 6.3.0** (big integers), vendored in `third_party/mini-gmp/`.
+  See `README.iqalox.md` there.
+
+`build/iqaloxvm --version` reports both versions.
+
 ## Test
 
 ```
