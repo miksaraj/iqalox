@@ -425,8 +425,8 @@ are to be asked when their phase starts. In outline:
 
 - **Numbers**: an exact arbitrary-precision integer type next to floats.
   - `/` always gives a float, and `//` is floor division on integers.
-  - `1 == 1.0` is false, though mixed arithmetic and ordering promote to
-    float.
+  - `1 == 1.0` is false; mixed arithmetic promotes to float, while
+    ordering compares exact values across ints and floats.
   - Floats always print with a decimal point.
   - Bitwise operators are `& | ~ << >>`.
   - Division by an integer zero is a **compile-time** error unless the
