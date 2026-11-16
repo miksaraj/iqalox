@@ -92,7 +92,7 @@ TEST_CASE("% is floored for ints of any size and for floats", "[numeric]") {
     REQUIRE_THROWS_AS(numeric::modulo(vm, powerOfTwo(vm, 100), i(0)), RuntimeError);
 }
 
-TEST_CASE("/ always gives a float, computed exactly and rounded once", "[numeric]") {
+TEST_CASE("division with / always gives a float, computed exactly and rounded once", "[numeric]") {
     Vm vm;
     REQUIRE(sameDouble(numeric::divide(vm, i(7), i(2)), 3.5));
     REQUIRE(sameDouble(numeric::divide(vm, i(6), i(2)), 3.0));
