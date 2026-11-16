@@ -81,7 +81,7 @@ let ``number and string constants encode with their tag, then payload`` () =
 
     let bytes =
         writeAndRead
-            { Constants = [| NumberConstant 1.5; StringConstant "hi" |]
+            { Constants = [| FloatConstant 1.5; StringConstant "hi" |]
               Code = code
               Lines = lines; Files = Array.zeroCreate lines.Length }
 
@@ -166,7 +166,7 @@ let ``each instruction's line is repeated once per byte of its own serialized le
     // every instruction after the first one wider than a single byte.
     let code = [| Constant 0; Pop |]
     let lines = [| 7; 9 |]
-    let bytes = writeAndRead { Constants = [| NumberConstant 1.0 |]; Code = code; Lines = lines; Files = Array.zeroCreate lines.Length }
+    let bytes = writeAndRead { Constants = [| IntConstant 1I |]; Code = code; Lines = lines; Files = Array.zeroCreate lines.Length }
 
     // Skip past the header/constant section to the code_length + code +
     // lines tail, which is all this test cares about.
@@ -284,7 +284,31 @@ let ``writeWithFiles puts the file table right after the version byte`` () =
 let ``each instruction's file index is written once per byte after the lines`` () =
     let code = [| Constant 0; Pop |]
     let bytes =
-        writeAndRead { Constants = [| NumberConstant 1.0 |]; Code = code; Lines = [| 5; 6 |]; Files = [| 0; 2 |] }
+        writeAndRead { Constants = [| IntConstant 1I |]; Code = code; Lines = [| 5; 6 |]; Files = [| 0; 2 |] }
     // tail: 4 bytes of code, 4 u16 lines (5,5,5,6), 4 u16 files (0,0,0,2)
     let files = bytes.[bytes.Length - 8 ..]
     Assert.Equal<byte[]>([| 0uy; 0uy; 0uy; 0uy; 0uy; 0uy; 2uy; 0uy |], files)
+
+[<Fact>]
+let ``integer constants use the 64-bit tag when they fit and the big tag otherwise (format v4)`` () =
+    let big = -(bigint.Pow(2I, 64))
+    let bytes =
+        writeAndRead
+            { Constants = [| IntConstant -5I; IntConstant big |]
+              Code = [||]
+              Lines = [||]; Files = [||] }
+
+    let expected = ResizeArray<byte>()
+    expected.AddRange("IQBC"B)
+    expected.Add(FormatVersion)
+    pushU16 expected 0us
+    pushU32 expected 2u
+    expected.Add(0x03uy) // int64 tag
+    expected.AddRange(BitConverter.GetBytes(-5L))
+    expected.Add(0x04uy) // big int tag
+    expected.Add(0x01uy) // negative
+    pushU32 expected 9u
+    expected.AddRange([| 0uy; 0uy; 0uy; 0uy; 0uy; 0uy; 0uy; 0uy; 1uy |]) // 2^64, least significant first
+    pushU32 expected 0u // code_length
+    Assert.Equal(4uy, FormatVersion)
+    Assert.Equal<byte[]>(expected.ToArray(), bytes)

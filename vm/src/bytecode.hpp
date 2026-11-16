@@ -19,10 +19,12 @@ namespace iqalox::bytecode {
 // v3 adds a source-FILE dimension on top (a program-wide file table plus a
 // per-instruction-byte file index, `Chunk::files`), since a multi-file
 // program compiles to one chunk -- `docs/PLAN-0.3.md` Phases 4-5.
+// v4 adds integer constants (int64 and big) for `0.4`'s exact integer type,
+// `docs/PLAN-0.4.md` Phase 1.
 // Supersedes format v0, Phase 1's minimal round-trip proof (a single
 // opcode: push a string constant, print it, halt) now that `compiler/`'s
 // codegen (Phase 5) actually produces real programs.
-[[maybe_unused]] constexpr uint8_t kFormatVersion = 3;
+[[maybe_unused]] constexpr uint8_t kFormatVersion = 4;
 
 // One-to-one with `compiler/src/Bytecode.fs`'s `opcodeOf` -- same names,
 // same byte values.

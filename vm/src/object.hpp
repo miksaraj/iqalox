@@ -6,6 +6,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "numeric.hpp"
 #include "value.hpp"
 
 namespace iqalox {
@@ -22,6 +23,7 @@ enum class ObjType : uint8_t {
     Class,
     Instance,
     BoundMethod,
+    BigInt,
 };
 
 // Base of every heap-allocated, GC-managed value. `next` is the intrusive
@@ -42,6 +44,14 @@ struct Obj {
 struct ObjString : Obj {
     std::string value;
     explicit ObjString(std::string v) : Obj(ObjType::String), value(std::move(v)) {}
+};
+
+// An exact integer outside the int64 range (docs/PLAN-0.4.md Phase 1).
+// Always canonical: `numeric::integerValue` is the only thing that creates
+// one, and only for a value that doesn't fit inline. Immutable.
+struct ObjBigInt : Obj {
+    numeric::BigInt value;
+    explicit ObjBigInt(numeric::BigInt v) : Obj(ObjType::BigInt), value(std::move(v)) {}
 };
 
 struct ObjVector : Obj {

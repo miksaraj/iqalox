@@ -1,3 +1,8 @@
+/// Bytecode format v4 (`docs/PLAN-0.4.md` Phase 1) adds integer constants
+/// for `0.4`'s exact integer type: tag 0x03 for one that fits in 64 bits,
+/// 0x04 for a larger one (see "constant" below). Tag 0x00 is now
+/// specifically a float. Everything else is unchanged from v3.
+///
 /// Bytecode format v3 adds a source-FILE dimension to v2's line table (see
 /// "files" below): a multi-file program (`docs/PLAN-0.3.md` Phases 4-5)
 /// compiles to ONE chunk whose code came from several source files, so a
@@ -27,7 +32,7 @@
 ///
 ///   offset  size  field
 ///   0       4     magic: 'I' 'Q' 'B' 'C'
-///   4       1     format version (0x03 for v3)
+///   4       1     format version (0x04 for v4)
 ///   5       2     file_count (u16), then for each file a name (u32
 ///                 length + UTF-8 bytes) -- the source files the program
 ///                 was compiled from, referred to by index below. A name
@@ -40,8 +45,13 @@
 ///   <chunk> serialization:
 ///     4     constant_count (u32)
 ///     for each constant:
-///       1     tag (0x00 number, 0x01 string, 0x02 function)
-///       if number:   8   f64
+///       1     tag (0x00 float, 0x01 string, 0x02 function,
+///                    0x03 int64, 0x04 big integer)
+///       if float:    8   f64
+///       if int64:    8   i64 (two's complement)
+///       if big int:  1 sign (0x00 non-negative, 0x01 negative), then
+///                    4+N u32 length, magnitude bytes least significant
+///                    first (only for values outside the i64 range)
 ///       if string:   4+N u32 length, UTF-8 bytes
 ///       if function: name (u32 length + UTF-8 bytes), 1 arity (u8),
 ///                    2 local_count (u16), 2 upvalue_count (u16),
@@ -74,7 +84,7 @@ open System.Text
 open Iqalox.Bound
 
 [<Literal>]
-let FormatVersion = 3uy
+let FormatVersion = 4uy
 
 type Instruction =
     | Constant of index: int
@@ -221,7 +231,10 @@ type Instruction =
     | GetSlice
 
 type Constant =
-    | NumberConstant of float
+    /// An exact integer of any size; `write` picks the 64-bit or the big
+    /// encoding.
+    | IntConstant of bigint
+    | FloatConstant of float
     | StringConstant of string
     | FunctionConstant of FunctionProto
 
@@ -353,7 +366,16 @@ let rec private writeChunk (writer: BinaryWriter) (chunk: Chunk) : unit =
     writer.Write(uint32 chunk.Constants.Length)
     for constant in chunk.Constants do
         match constant with
-        | NumberConstant n ->
+        | IntConstant n when n >= bigint System.Int64.MinValue && n <= bigint System.Int64.MaxValue ->
+            writer.Write(0x03uy)
+            writer.Write(int64 n)
+        | IntConstant n ->
+            writer.Write(0x04uy)
+            writer.Write(if n.Sign < 0 then 1uy else 0uy)
+            let magnitude = System.Numerics.BigInteger.Abs(n).ToByteArray(isUnsigned = true, isBigEndian = false)
+            writer.Write(uint32 magnitude.Length)
+            writer.Write(magnitude)
+        | FloatConstant n ->
             writer.Write(0x00uy)
             writer.Write(n: float)
         | StringConstant s ->

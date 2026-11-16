@@ -1,7 +1,8 @@
-# Syntax Grammar for Iqalox (0.3)
+# Syntax Grammar for Iqalox (0.4)
 *WIP — target spec, phased into `compiler/`+`vm/` incrementally
-(`docs/PLAN-0.3.md` §5); see that document's §4 feature checklist for
-what has actually landed so far.*
+(`docs/PLAN-0.4.md` §5); see that document's §4 feature checklist for
+what has actually landed so far. Until `0.4`'s phases are done, this is
+`0.3`'s grammar plus the "Notes: new for `0.4`" below.*
 
 This is `0.2`'s grammar (`langspec/SYNTAX_GRAMMAR.md` at git tag `0.2.0`) plus
 everything `docs/PLAN-0.3.md` §1 has resolved for `0.3` so far: slices
@@ -162,6 +163,21 @@ own top-level grammar grew from `0.1`'s.
   are reserved words. The standard library is a set of built-in modules
   under `std` (`std.vector`, `std.matrix`) imported the same way
   (`docs/PLAN-0.3.md` Phase 6); only `print` needs no import.
+## Notes: new for `0.4`
+
+* **Number literals are integers or floats** (`docs/PLAN-0.4.md` decisions
+  1-2, Phase 1). Purely lexical: the `NUMBER` token in `primary` is
+  unchanged, only what the scanner accepts as one (see the lexical grammar
+  in the root `README.md` and `docs/LANGUAGE.md` §2). A decimal point or
+  an exponent makes a float (`3.14`, `.5`, `1.`, `1e9`); anything else is
+  an exact integer (`42`, `0xFF`, `0b1010`, `0o17`, `1_000_000`).
+* **A leading-dot float (`.5`) depends on the preceding character.** It
+  scans as a float only when the character directly before the `.` can't
+  end an expression. So `x.5` is member access and `f .5` / `(.5)` are
+  floats: the same kind of whitespace rule `0.2` introduced for `v[i]`
+  versus `f [i]`. `...` is unaffected, since its second `.` isn't a
+  digit.
+
 ##
     program         → declaration* EOF ;
 

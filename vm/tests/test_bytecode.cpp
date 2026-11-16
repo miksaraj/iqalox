@@ -76,7 +76,7 @@ TEST_CASE("an empty top-level chunk loads as a zero-arity script function", "[by
     REQUIRE(script->chunk.code.empty());
 }
 
-TEST_CASE("number and string constants decode to their runtime Values", "[bytecode]") {
+TEST_CASE("float and string constants decode to their runtime Values", "[bytecode]") {
     auto bytes = header();
     pushU32(bytes, 2);  // constant_count
     bytes.push_back(0x00);
@@ -99,12 +99,41 @@ TEST_CASE("number and string constants decode to their runtime Values", "[byteco
     ObjFunction* script = bytecode::load(file.path, vm);
 
     REQUIRE(script->chunk.constants.size() == 2);
-    REQUIRE(isNumber(script->chunk.constants[0]));
-    REQUIRE(asNumber(script->chunk.constants[0]) == 1.5);
+    REQUIRE(isDouble(script->chunk.constants[0]));
+    REQUIRE(asDouble(script->chunk.constants[0]) == 1.5);
     REQUIRE(isObj(script->chunk.constants[1]));
     REQUIRE(static_cast<ObjString*>(asObj(script->chunk.constants[1]))->value == "hi");
     REQUIRE(script->chunk.code == code);
     REQUIRE(script->chunk.lines.size() == code.size());
+}
+
+TEST_CASE("int64 and big integer constants decode canonically (format v4)", "[bytecode]") {
+    auto bytes = header();
+    pushU32(bytes, 3);  // constant_count
+    bytes.push_back(0x03);  // int64: -5, two's complement little-endian
+    for (int i = 0; i < 8; ++i) bytes.push_back(i == 0 ? 0xFB : 0xFF);
+    bytes.push_back(0x04);  // big int: -(2^64), magnitude 00..00 01 (9 bytes)
+    bytes.push_back(0x01);
+    pushU32(bytes, 9);
+    for (int i = 0; i < 8; ++i) bytes.push_back(0x00);
+    bytes.push_back(0x01);
+    bytes.push_back(0x04);  // big int encoding of a value that fits: 7
+    bytes.push_back(0x00);
+    pushU32(bytes, 1);
+    bytes.push_back(0x07);
+    pushU32(bytes, 0);  // code_length
+    TempFile file(bytes);
+
+    Vm vm;
+    ObjFunction* script = bytecode::load(file.path, vm);
+
+    REQUIRE(script->chunk.constants.size() == 3);
+    REQUIRE(asSmallInt(script->chunk.constants[0]) == -5);
+    REQUIRE(stringify(script->chunk.constants[1]) == "-18446744073709551616");
+    REQUIRE(typeName(script->chunk.constants[1]) == "int");
+    // A big encoding of a small value still loads as the inline int64.
+    REQUIRE(isSmallInt(script->chunk.constants[2]));
+    REQUIRE(asSmallInt(script->chunk.constants[2]) == 7);
 }
 
 TEST_CASE("a nested FunctionConstant decodes its name/arity/locals/upvalues and its own chunk", "[bytecode]") {

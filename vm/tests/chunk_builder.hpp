@@ -20,8 +20,19 @@ class ChunkBuilder {
 public:
     explicit ChunkBuilder(Vm& vm) : vm_(vm) {}
 
-    uint16_t addNumberConstant(double n) {
-        constants_.push_back(numberValue(n));
+    uint16_t addIntConstant(int64_t n) {
+        constants_.push_back(smallIntValue(n));
+        return static_cast<uint16_t>(constants_.size() - 1);
+    }
+
+    uint16_t addFloatConstant(double n) {
+        constants_.push_back(doubleValue(n));
+        return static_cast<uint16_t>(constants_.size() - 1);
+    }
+
+    // Any already-built Value, e.g. a big integer from numeric::integerValue.
+    uint16_t addValueConstant(const Value& v) {
+        constants_.push_back(v);
         return static_cast<uint16_t>(constants_.size() - 1);
     }
 

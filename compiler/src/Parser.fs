@@ -76,7 +76,8 @@ let private startsArgumentAfter (prev: Token) (token: Token) =
 
 let private literalValueOf (token: Token) : LiteralValue =
     match token.Literal with
-    | NumberLiteral n -> NumberValue n
+    | IntLiteral n -> IntValue n
+    | FloatLiteral n -> FloatValue n
     | StringLiteral s -> StringValue s
     | NoLiteral -> failwith "unreachable: a NUMBER/STRING token always carries a literal value"
 

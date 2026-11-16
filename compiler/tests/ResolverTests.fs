@@ -312,7 +312,7 @@ let ``indexing resolves the object and index sub-expressions`` () =
     Assert.Empty errors
     match bound with
     | [ BVarStmt(DeclaredGlobal "v", _, _)
-        BExpressionStmt(BIndex(BVariable(GlobalBinding "v", _), BLiteral(NumberValue 0.0), _)) ] -> ()
+        BExpressionStmt(BIndex(BVariable(GlobalBinding "v", _), BLiteral(IntValue(Is 0I)), _)) ] -> ()
     | _ -> failwith $"unexpected shape: %A{bound}"
 
 [<Fact>]
@@ -321,7 +321,7 @@ let ``indexed assignment resolves obj, index, and value sub-expressions`` () =
     Assert.Empty errors
     match bound with
     | [ BVarStmt(DeclaredGlobal "v", _, _)
-        BExpressionStmt(BIndexSet(BVariable(GlobalBinding "v", _), BLiteral(NumberValue 0.0), BLiteral(NumberValue 9.0), _)) ] ->
+        BExpressionStmt(BIndexSet(BVariable(GlobalBinding "v", _), BLiteral(IntValue(Is 0I)), BLiteral(IntValue(Is 9I)), _)) ] ->
         ()
     | _ -> failwith $"unexpected shape: %A{bound}"
 
@@ -332,7 +332,7 @@ let ``a slice with both bounds resolves the object and both bound sub-expression
     Assert.Empty errors
     match bound with
     | [ BVarStmt(DeclaredGlobal "v", _, _)
-        BExpressionStmt(BSlice(BVariable(GlobalBinding "v", _), Some(BLiteral(NumberValue 1.0)), Some(BLiteral(NumberValue 2.0)), _)) ] ->
+        BExpressionStmt(BSlice(BVariable(GlobalBinding "v", _), Some(BLiteral(IntValue(Is 1I))), Some(BLiteral(IntValue(Is 2I))), _)) ] ->
         ()
     | _ -> failwith $"unexpected shape: %A{bound}"
 
@@ -342,7 +342,7 @@ let ``a slice with an omitted bound resolves it as None, not a placeholder expre
     Assert.Empty errors
     match bound with
     | [ BVarStmt(DeclaredGlobal "v", _, _)
-        BExpressionStmt(BSlice(BVariable(GlobalBinding "v", _), None, Some(BLiteral(NumberValue 2.0)), _)) ] -> ()
+        BExpressionStmt(BSlice(BVariable(GlobalBinding "v", _), None, Some(BLiteral(IntValue(Is 2I))), _)) ] -> ()
     | _ -> failwith $"unexpected shape: %A{bound}"
 
 [<Fact>]
@@ -386,7 +386,7 @@ let ``cons desugars to a call of a synthetic two-parameter closure`` () =
     let bound, errors = resolveSource "[1 | xs]"
     Assert.Empty errors
     match bound with
-    | [ BExpressionStmt(BCall(BLambda decl, [ BLiteral(NumberValue 1.0); _ ])) ] ->
+    | [ BExpressionStmt(BCall(BLambda decl, [ BLiteral(IntValue(Is 1I)); _ ])) ] ->
         Assert.Equal("cons", decl.Name.Lexeme)
         Assert.Equal(2, decl.Parameters.Length)
     | _ -> failwith $"unexpected shape: %A{bound}"
@@ -465,7 +465,7 @@ let ``spread and plain elements resolve independently within the same vector`` (
     let bound, errors = resolveSource "var a = [1]\n[0, ...a, 2]"
     Assert.Empty errors
     match bound with
-    | [ _; BExpressionStmt(BVector [ BLiteral(NumberValue 0.0); BSpread(BVariable(GlobalBinding "a", _), _); BLiteral(NumberValue 2.0) ]) ] ->
+    | [ _; BExpressionStmt(BVector [ BLiteral(IntValue(Is 0I)); BSpread(BVariable(GlobalBinding "a", _), _); BLiteral(IntValue(Is 2I)) ]) ] ->
         ()
     | other -> failwith $"unexpected shape: %A{other}"
 
@@ -536,7 +536,7 @@ let ``the class's own method overriding a used trait's is not a conflict`` () =
     match bound with
     | [ BClassStmt(_, _, _, _, _, [ flyDecl ]) ] ->
         match flyDecl.Body with
-        | [ BReturnStmt(_, Some(BLiteral(NumberValue 2.0))) ] -> ()
+        | [ BReturnStmt(_, Some(BLiteral(IntValue(Is 2I)))) ] -> ()
         | body -> failwith $"expected the class's own override to win, got %A{body}"
     | _ -> failwith $"unexpected shape: %A{bound}"
 

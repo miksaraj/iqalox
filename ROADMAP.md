@@ -225,12 +225,15 @@ phased sequencing.
   distinct from floats, with integer division (`//`) and bitwise operators
   that apply to integers. Deliberately a breaking change, made now rather
   than later because of the stability line. **Details resolved in
-  `docs/PLAN-0.4.md` §1** (decisions 1-12):
+  `docs/PLAN-0.4.md` §1** (decisions 1-12 and 30-35; implemented in
+  Phase 1):
   - a decimal point (or an exponent) makes a float; hex, binary and octal
     literals and `_` separators are added;
   - `/` always gives a float, and `//` is floor division on integers only;
-  - mixed arithmetic and ordering promote to float, but `1 == 1.0` is
-    **false**;
+  - mixed arithmetic promotes to float, ordering compares exact values
+    across both kinds, and `1 == 1.0` is **false**;
+  - `/` and a negative `^` on two integers are computed exactly, then
+    rounded once; integers are capped at 2^26 bits;
   - floats always print with a decimal point;
   - indices must be integers;
   - bitwise operators are `& | ~ << >>` with Python-like precedence;

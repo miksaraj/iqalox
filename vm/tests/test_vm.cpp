@@ -16,9 +16,9 @@ using iqalox::testing::ChunkBuilder;
 TEST_CASE("arithmetic evaluates and a global holds the result", "[vm]") {
     Vm vm;
     ChunkBuilder b(vm);
-    uint16_t one = b.addNumberConstant(1);
-    uint16_t two = b.addNumberConstant(2);
-    uint16_t three = b.addNumberConstant(3);
+    uint16_t one = b.addIntConstant(1);
+    uint16_t two = b.addIntConstant(2);
+    uint16_t three = b.addIntConstant(3);
     uint16_t result = b.addStringConstant("result");
 
     // result = 1 + 2 * 3
@@ -32,14 +32,14 @@ TEST_CASE("arithmetic evaluates and a global holds the result", "[vm]") {
     vm.interpret(b.build());
 
     REQUIRE(vm.getGlobal("result") != nullptr);
-    REQUIRE(asNumber(*vm.getGlobal("result")) == 7.0);
+    REQUIRE(asSmallInt(*vm.getGlobal("result")) == 7);
 }
 
 TEST_CASE("modulo and power match Python's floored-modulo semantics, not C's fmod", "[vm]") {
     Vm vm;
     ChunkBuilder b(vm);
-    uint16_t negOne = b.addNumberConstant(-1);
-    uint16_t four = b.addNumberConstant(4);
+    uint16_t negOne = b.addIntConstant(-1);
+    uint16_t four = b.addIntConstant(4);
     uint16_t result = b.addStringConstant("result");
 
     b.emitU16(OpCode::Constant, negOne);
@@ -49,14 +49,14 @@ TEST_CASE("modulo and power match Python's floored-modulo semantics, not C's fmo
 
     vm.interpret(b.build());
 
-    REQUIRE(asNumber(*vm.getGlobal("result")) == 3.0);  // Python: -1 % 4 == 3, not fmod's -1
+    REQUIRE(asSmallInt(*vm.getGlobal("result")) == 3);  // Python: -1 % 4 == 3, not fmod's -1
 }
 
 TEST_CASE("comparisons and equality produce booleans", "[vm]") {
     Vm vm;
     ChunkBuilder b(vm);
-    uint16_t one = b.addNumberConstant(1);
-    uint16_t two = b.addNumberConstant(2);
+    uint16_t one = b.addIntConstant(1);
+    uint16_t two = b.addIntConstant(2);
     uint16_t result = b.addStringConstant("result");
 
     b.emitU16(OpCode::Constant, one);
@@ -73,7 +73,7 @@ TEST_CASE("comparisons and equality produce booleans", "[vm]") {
 TEST_CASE("only nil and false are falsy -- 0 is truthy", "[vm]") {
     Vm vm;
     ChunkBuilder b(vm);
-    uint16_t zero = b.addNumberConstant(0);
+    uint16_t zero = b.addIntConstant(0);
     uint16_t result = b.addStringConstant("result");
 
     b.emitU16(OpCode::Constant, zero);
@@ -105,9 +105,9 @@ TEST_CASE("strings compare equal by content, not identity", "[vm]") {
 TEST_CASE("vectors compare equal element-wise and recursively", "[vm]") {
     Vm vm;
     ChunkBuilder b(vm);
-    uint16_t one = b.addNumberConstant(1);
-    uint16_t two = b.addNumberConstant(2);
-    uint16_t three = b.addNumberConstant(3);
+    uint16_t one = b.addIntConstant(1);
+    uint16_t two = b.addIntConstant(2);
+    uint16_t three = b.addIntConstant(3);
     uint16_t result = b.addStringConstant("result");
 
     b.emitU16(OpCode::Constant, one);
@@ -128,10 +128,10 @@ TEST_CASE("indexed get/set read and write vector elements", "[vm]") {
     // docs/PLAN-0.2.md Phase 1: v[i] read/write, 0-based, bounds-checked.
     Vm vm;
     ChunkBuilder b(vm);
-    uint16_t ten = b.addNumberConstant(10);
-    uint16_t twenty = b.addNumberConstant(20);
-    uint16_t ninetyNine = b.addNumberConstant(99);
-    uint16_t one = b.addNumberConstant(1);
+    uint16_t ten = b.addIntConstant(10);
+    uint16_t twenty = b.addIntConstant(20);
+    uint16_t ninetyNine = b.addIntConstant(99);
+    uint16_t one = b.addIntConstant(1);
     uint16_t vName = b.addStringConstant("v");
     uint16_t resultName = b.addStringConstant("result");
 
@@ -153,14 +153,14 @@ TEST_CASE("indexed get/set read and write vector elements", "[vm]") {
 
     vm.interpret(b.build());
 
-    REQUIRE(asNumber(*vm.getGlobal("result")) == 99.0);
+    REQUIRE(asSmallInt(*vm.getGlobal("result")) == 99);
 }
 
 TEST_CASE("indexing out of range is a runtime error", "[vm]") {
     Vm vm;
     ChunkBuilder b(vm);
-    uint16_t one = b.addNumberConstant(1);
-    uint16_t five = b.addNumberConstant(5);
+    uint16_t one = b.addIntConstant(1);
+    uint16_t five = b.addIntConstant(5);
     b.emitU16(OpCode::Constant, one);
     b.emitU16(OpCode::BuildVector, 1);  // [1] -- valid indices are just 0
     b.emitU16(OpCode::Constant, five);
@@ -174,10 +174,10 @@ TEST_CASE("a valid negative index reads from the end of the vector", "[vm]") {
     // to length + index -- no longer an error, unlike 0.2.
     Vm vm;
     ChunkBuilder b(vm);
-    uint16_t ten = b.addNumberConstant(10);
-    uint16_t twenty = b.addNumberConstant(20);
-    uint16_t thirty = b.addNumberConstant(30);
-    uint16_t negOne = b.addNumberConstant(-1);
+    uint16_t ten = b.addIntConstant(10);
+    uint16_t twenty = b.addIntConstant(20);
+    uint16_t thirty = b.addIntConstant(30);
+    uint16_t negOne = b.addIntConstant(-1);
     uint16_t result = b.addStringConstant("result");
 
     b.emitU16(OpCode::Constant, ten);
@@ -190,16 +190,16 @@ TEST_CASE("a valid negative index reads from the end of the vector", "[vm]") {
 
     vm.interpret(b.build());
 
-    REQUIRE(asNumber(*vm.getGlobal("result")) == 30.0);
+    REQUIRE(asSmallInt(*vm.getGlobal("result")) == 30);
 }
 
 TEST_CASE("a valid negative index also writes to the end of the vector", "[vm]") {
     Vm vm;
     ChunkBuilder b(vm);
-    uint16_t ten = b.addNumberConstant(10);
-    uint16_t twenty = b.addNumberConstant(20);
-    uint16_t ninetyNine = b.addNumberConstant(99);
-    uint16_t negOne = b.addNumberConstant(-1);
+    uint16_t ten = b.addIntConstant(10);
+    uint16_t twenty = b.addIntConstant(20);
+    uint16_t ninetyNine = b.addIntConstant(99);
+    uint16_t negOne = b.addIntConstant(-1);
     uint16_t vName = b.addStringConstant("v");
     uint16_t result = b.addStringConstant("result");
 
@@ -221,14 +221,14 @@ TEST_CASE("a valid negative index also writes to the end of the vector", "[vm]")
 
     vm.interpret(b.build());
 
-    REQUIRE(asNumber(*vm.getGlobal("result")) == 99.0);
+    REQUIRE(asSmallInt(*vm.getGlobal("result")) == 99);
 }
 
 TEST_CASE("an out-of-range negative index is still a runtime error", "[vm]") {
     Vm vm;
     ChunkBuilder b(vm);
-    uint16_t one = b.addNumberConstant(1);
-    uint16_t tooNegative = b.addNumberConstant(-100);
+    uint16_t one = b.addIntConstant(1);
+    uint16_t tooNegative = b.addIntConstant(-100);
     b.emitU16(OpCode::Constant, one);
     b.emitU16(OpCode::BuildVector, 1);  // [1] -- valid indices are 0 and -1 only
     b.emitU16(OpCode::Constant, tooNegative);
@@ -240,8 +240,8 @@ TEST_CASE("an out-of-range negative index is still a runtime error", "[vm]") {
 TEST_CASE("indexing with a non-integer index is a runtime error", "[vm]") {
     Vm vm;
     ChunkBuilder b(vm);
-    uint16_t one = b.addNumberConstant(1);
-    uint16_t half = b.addNumberConstant(0.5);
+    uint16_t one = b.addIntConstant(1);
+    uint16_t half = b.addFloatConstant(0.5);
     b.emitU16(OpCode::Constant, one);
     b.emitU16(OpCode::BuildVector, 1);
     b.emitU16(OpCode::Constant, half);
@@ -253,7 +253,7 @@ TEST_CASE("indexing with a non-integer index is a runtime error", "[vm]") {
 TEST_CASE("indexing with a non-number index is a runtime error", "[vm]") {
     Vm vm;
     ChunkBuilder b(vm);
-    uint16_t one = b.addNumberConstant(1);
+    uint16_t one = b.addIntConstant(1);
     b.emitU16(OpCode::Constant, one);
     b.emitU16(OpCode::BuildVector, 1);
     b.emit(OpCode::True);  // index = true, not a number
@@ -265,8 +265,8 @@ TEST_CASE("indexing with a non-number index is a runtime error", "[vm]") {
 TEST_CASE("indexing a non-vector value is a runtime error", "[vm]") {
     Vm vm;
     ChunkBuilder b(vm);
-    uint16_t one = b.addNumberConstant(1);
-    uint16_t zero = b.addNumberConstant(0);
+    uint16_t one = b.addIntConstant(1);
+    uint16_t zero = b.addIntConstant(0);
     b.emitU16(OpCode::Constant, one);  // receiver = 1, not a vector
     b.emitU16(OpCode::Constant, zero);
     b.emit(OpCode::GetIndex);
@@ -277,8 +277,8 @@ TEST_CASE("indexing a non-vector value is a runtime error", "[vm]") {
 TEST_CASE("assigning into a non-vector value via index is a runtime error", "[vm]") {
     Vm vm;
     ChunkBuilder b(vm);
-    uint16_t one = b.addNumberConstant(1);
-    uint16_t zero = b.addNumberConstant(0);
+    uint16_t one = b.addIntConstant(1);
+    uint16_t zero = b.addIntConstant(0);
     b.emitU16(OpCode::Constant, one);  // receiver = 1, not a vector
     b.emitU16(OpCode::Constant, zero);
     b.emitU16(OpCode::Constant, one);
@@ -295,10 +295,10 @@ namespace {
 // vector's own element constants for reuse by callers that need to
 // assert against specific values.
 void buildFourElementVector(Vm& vm, ChunkBuilder& b, uint16_t vName) {
-    uint16_t ten = b.addNumberConstant(10);
-    uint16_t twenty = b.addNumberConstant(20);
-    uint16_t thirty = b.addNumberConstant(30);
-    uint16_t forty = b.addNumberConstant(40);
+    uint16_t ten = b.addIntConstant(10);
+    uint16_t twenty = b.addIntConstant(20);
+    uint16_t thirty = b.addIntConstant(30);
+    uint16_t forty = b.addIntConstant(40);
     b.emitU16(OpCode::Constant, ten);
     b.emitU16(OpCode::Constant, twenty);
     b.emitU16(OpCode::Constant, thirty);
@@ -314,8 +314,8 @@ TEST_CASE("a basic slice is end-inclusive", "[vm]") {
     ChunkBuilder b(vm);
     uint16_t vName = b.addStringConstant("v");
     uint16_t result = b.addStringConstant("result");
-    uint16_t one = b.addNumberConstant(1);
-    uint16_t two = b.addNumberConstant(2);
+    uint16_t one = b.addIntConstant(1);
+    uint16_t two = b.addIntConstant(2);
     buildFourElementVector(vm, b, vName);  // v = [10, 20, 30, 40]
 
     b.emitU16(OpCode::GetGlobal, vName);
@@ -328,8 +328,8 @@ TEST_CASE("a basic slice is end-inclusive", "[vm]") {
 
     auto* vec = static_cast<ObjVector*>(asObj(*vm.getGlobal("result")));
     REQUIRE(vec->elements.size() == 2);
-    REQUIRE(asNumber(vec->elements[0]) == 20.0);
-    REQUIRE(asNumber(vec->elements[1]) == 30.0);
+    REQUIRE(asSmallInt(vec->elements[0]) == 20);
+    REQUIRE(asSmallInt(vec->elements[1]) == 30);
 }
 
 TEST_CASE("an omitted slice bound defaults to start/end", "[vm]") {
@@ -337,7 +337,7 @@ TEST_CASE("an omitted slice bound defaults to start/end", "[vm]") {
     ChunkBuilder b(vm);
     uint16_t vName = b.addStringConstant("v");
     uint16_t result = b.addStringConstant("result");
-    uint16_t two = b.addNumberConstant(2);
+    uint16_t two = b.addIntConstant(2);
     buildFourElementVector(vm, b, vName);  // v = [10, 20, 30, 40]
 
     b.emitU16(OpCode::GetGlobal, vName);
@@ -350,7 +350,7 @@ TEST_CASE("an omitted slice bound defaults to start/end", "[vm]") {
 
     auto* vec = static_cast<ObjVector*>(asObj(*vm.getGlobal("result")));
     REQUIRE(vec->elements.size() == 3);
-    REQUIRE(asNumber(vec->elements[2]) == 30.0);
+    REQUIRE(asSmallInt(vec->elements[2]) == 30);
 }
 
 TEST_CASE("both slice bounds omitted copies the whole vector", "[vm]") {
@@ -377,8 +377,8 @@ TEST_CASE("negative slice bounds count from the end", "[vm]") {
     ChunkBuilder b(vm);
     uint16_t vName = b.addStringConstant("v");
     uint16_t result = b.addStringConstant("result");
-    uint16_t negThree = b.addNumberConstant(-3);
-    uint16_t negOne = b.addNumberConstant(-1);
+    uint16_t negThree = b.addIntConstant(-3);
+    uint16_t negOne = b.addIntConstant(-1);
     buildFourElementVector(vm, b, vName);  // v = [10, 20, 30, 40]
 
     b.emitU16(OpCode::GetGlobal, vName);
@@ -391,8 +391,8 @@ TEST_CASE("negative slice bounds count from the end", "[vm]") {
 
     auto* vec = static_cast<ObjVector*>(asObj(*vm.getGlobal("result")));
     REQUIRE(vec->elements.size() == 3);
-    REQUIRE(asNumber(vec->elements[0]) == 20.0);
-    REQUIRE(asNumber(vec->elements[2]) == 40.0);
+    REQUIRE(asSmallInt(vec->elements[0]) == 20);
+    REQUIRE(asSmallInt(vec->elements[2]) == 40);
 }
 
 TEST_CASE("a slice with start after stop is an empty vector, not an error", "[vm]") {
@@ -400,8 +400,8 @@ TEST_CASE("a slice with start after stop is an empty vector, not an error", "[vm
     ChunkBuilder b(vm);
     uint16_t vName = b.addStringConstant("v");
     uint16_t result = b.addStringConstant("result");
-    uint16_t three = b.addNumberConstant(3);
-    uint16_t one = b.addNumberConstant(1);
+    uint16_t three = b.addIntConstant(3);
+    uint16_t one = b.addIntConstant(1);
     buildFourElementVector(vm, b, vName);
 
     b.emitU16(OpCode::GetGlobal, vName);
@@ -421,8 +421,8 @@ TEST_CASE("an out-of-range slice bound clamps instead of erroring", "[vm]") {
     ChunkBuilder b(vm);
     uint16_t vName = b.addStringConstant("v");
     uint16_t result = b.addStringConstant("result");
-    uint16_t zero = b.addNumberConstant(0);
-    uint16_t hundred = b.addNumberConstant(100);
+    uint16_t zero = b.addIntConstant(0);
+    uint16_t hundred = b.addIntConstant(100);
     buildFourElementVector(vm, b, vName);  // v = [10, 20, 30, 40]
 
     b.emitU16(OpCode::GetGlobal, vName);
@@ -442,9 +442,9 @@ TEST_CASE("a slice is a copy, not a view -- mutating it doesn't mutate the sourc
     ChunkBuilder b(vm);
     uint16_t vName = b.addStringConstant("v");
     uint16_t resultName = b.addStringConstant("result");
-    uint16_t zero = b.addNumberConstant(0);
-    uint16_t one = b.addNumberConstant(1);
-    uint16_t ninetyNine = b.addNumberConstant(99);
+    uint16_t zero = b.addIntConstant(0);
+    uint16_t one = b.addIntConstant(1);
+    uint16_t ninetyNine = b.addIntConstant(99);
     buildFourElementVector(vm, b, vName);  // v = [10, 20, 30, 40]
 
     b.emitU16(OpCode::GetGlobal, vName);
@@ -462,14 +462,14 @@ TEST_CASE("a slice is a copy, not a view -- mutating it doesn't mutate the sourc
     vm.interpret(b.build());
 
     auto* original = static_cast<ObjVector*>(asObj(*vm.getGlobal("v")));
-    REQUIRE(asNumber(original->elements[0]) == 10.0);
+    REQUIRE(asSmallInt(original->elements[0]) == 10);
 }
 
 TEST_CASE("slicing a non-vector value is a runtime error", "[vm]") {
     Vm vm;
     ChunkBuilder b(vm);
-    uint16_t one = b.addNumberConstant(1);
-    uint16_t zero = b.addNumberConstant(0);
+    uint16_t one = b.addIntConstant(1);
+    uint16_t zero = b.addIntConstant(0);
     b.emitU16(OpCode::Constant, one);  // receiver = 1, not a vector
     b.emit(OpCode::Nil);
     b.emitU16(OpCode::Constant, zero);
@@ -513,7 +513,7 @@ TEST_CASE("reading an undefined global is a runtime error", "[vm]") {
 TEST_CASE("assigning to an undeclared global is a runtime error", "[vm]") {
     Vm vm;
     ChunkBuilder b(vm);
-    uint16_t one = b.addNumberConstant(1);
+    uint16_t one = b.addIntConstant(1);
     uint16_t name = b.addStringConstant("neverDeclared");
     b.emitU16(OpCode::Constant, one);
     b.emitU16(OpCode::SetGlobal, name);
@@ -524,8 +524,8 @@ TEST_CASE("assigning to an undeclared global is a runtime error", "[vm]") {
 TEST_CASE("division by zero is a runtime error", "[vm]") {
     Vm vm;
     ChunkBuilder b(vm);
-    uint16_t one = b.addNumberConstant(1);
-    uint16_t zero = b.addNumberConstant(0);
+    uint16_t one = b.addIntConstant(1);
+    uint16_t zero = b.addIntConstant(0);
     b.emitU16(OpCode::Constant, one);
     b.emitU16(OpCode::Constant, zero);
     b.emit(OpCode::Divide);
@@ -542,8 +542,8 @@ TEST_CASE("a runtime error reports the source line the faulting instruction came
     // own to derive them from.
     Vm vm;
     ChunkBuilder b(vm);
-    uint16_t one = b.addNumberConstant(1);
-    uint16_t zero = b.addNumberConstant(0);
+    uint16_t one = b.addIntConstant(1);
+    uint16_t zero = b.addIntConstant(0);
     b.emitU16(OpCode::Constant, one);  // bytes 0-2
     b.emitU16(OpCode::Constant, zero);  // bytes 3-5
     b.emit(OpCode::Divide);  // byte 6
@@ -563,7 +563,7 @@ TEST_CASE("a runtime error reports the source line the faulting instruction came
 TEST_CASE("adding a non-number is a runtime error", "[vm]") {
     Vm vm;
     ChunkBuilder b(vm);
-    uint16_t one = b.addNumberConstant(1);
+    uint16_t one = b.addIntConstant(1);
     b.emitU16(OpCode::Constant, one);
     b.emit(OpCode::True);
     b.emit(OpCode::Add);
@@ -574,7 +574,7 @@ TEST_CASE("adding a non-number is a runtime error", "[vm]") {
 TEST_CASE("calling a non-callable value is a runtime error", "[vm]") {
     Vm vm;
     ChunkBuilder b(vm);
-    uint16_t one = b.addNumberConstant(1);
+    uint16_t one = b.addIntConstant(1);
     b.emitU16(OpCode::Constant, one);
     b.emitU16(OpCode::Call, 0);
 
@@ -599,8 +599,8 @@ TEST_CASE("calling a closure with the wrong argument count is a runtime error", 
 TEST_CASE("a jump-based conditional (elvis-style) selects the correct branch", "[vm]") {
     Vm vm;
     ChunkBuilder b(vm);
-    uint16_t thenVal = b.addNumberConstant(1);
-    uint16_t elseVal = b.addNumberConstant(2);
+    uint16_t thenVal = b.addIntConstant(1);
+    uint16_t elseVal = b.addIntConstant(2);
     uint16_t result = b.addStringConstant("result");
 
     b.emit(OpCode::False);
@@ -616,14 +616,14 @@ TEST_CASE("a jump-based conditional (elvis-style) selects the correct branch", "
 
     vm.interpret(b.build());
 
-    REQUIRE(asNumber(*vm.getGlobal("result")) == 2.0);
+    REQUIRE(asSmallInt(*vm.getGlobal("result")) == 2);
 }
 
 TEST_CASE("a function call passes arguments and returns a value", "[vm]") {
     Vm vm;
     // fun addOne(a) { return a + 1; }
     ChunkBuilder fnBuilder(vm);
-    uint16_t one = fnBuilder.addNumberConstant(1);
+    uint16_t one = fnBuilder.addIntConstant(1);
     fnBuilder.emitU16(OpCode::GetLocal, 0);
     fnBuilder.emitU16(OpCode::Constant, one);
     fnBuilder.emit(OpCode::Add);
@@ -632,7 +632,7 @@ TEST_CASE("a function call passes arguments and returns a value", "[vm]") {
 
     ChunkBuilder b(vm);
     uint16_t fnIndex = b.addFunctionConstant(fn);
-    uint16_t five = b.addNumberConstant(5);
+    uint16_t five = b.addIntConstant(5);
     uint16_t result = b.addStringConstant("result");
 
     b.emitClosure(fnIndex, {});
@@ -642,7 +642,7 @@ TEST_CASE("a function call passes arguments and returns a value", "[vm]") {
 
     vm.interpret(b.build());
 
-    REQUIRE(asNumber(*vm.getGlobal("result")) == 6.0);
+    REQUIRE(asSmallInt(*vm.getGlobal("result")) == 6);
 }
 
 TEST_CASE("a closure captures an enclosing local and outlives the frame that declared it", "[vm]") {
@@ -654,7 +654,7 @@ TEST_CASE("a closure captures an enclosing local and outlives the frame that dec
     ObjFunction* getFn = getBuilder.build(0, "get");
 
     ChunkBuilder makeGetterBuilder(vm);
-    uint16_t fortyTwo = makeGetterBuilder.addNumberConstant(42);
+    uint16_t fortyTwo = makeGetterBuilder.addIntConstant(42);
     uint16_t getIndex = makeGetterBuilder.addFunctionConstant(getFn);
     makeGetterBuilder.emitU16(OpCode::Constant, fortyTwo);  // slot 0: x = 42
     makeGetterBuilder.emitClosure(getIndex, {{true, 0}});   // captures slot 0 directly
@@ -672,7 +672,7 @@ TEST_CASE("a closure captures an enclosing local and outlives the frame that dec
 
     vm.interpret(b.build());
 
-    REQUIRE(asNumber(*vm.getGlobal("result")) == 42.0);
+    REQUIRE(asSmallInt(*vm.getGlobal("result")) == 42);
 }
 
 TEST_CASE("two closures over the same local share one upvalue -- a write through one is visible to the other",
@@ -680,7 +680,7 @@ TEST_CASE("two closures over the same local share one upvalue -- a write through
     Vm vm;
     // fun increment() { x = x + 1; return x; }  -- reads/writes the shared upvalue
     ChunkBuilder incBuilder(vm);
-    uint16_t one = incBuilder.addNumberConstant(1);
+    uint16_t one = incBuilder.addIntConstant(1);
     incBuilder.emitU16(OpCode::GetUpvalue, 0);
     incBuilder.emitU16(OpCode::Constant, one);
     incBuilder.emit(OpCode::Add);
@@ -692,7 +692,7 @@ TEST_CASE("two closures over the same local share one upvalue -- a write through
 
     // fun makeCounter() { var x mut = 0; fun increment() {...}; return increment; }
     ChunkBuilder makeCounterBuilder(vm);
-    uint16_t zero = makeCounterBuilder.addNumberConstant(0);
+    uint16_t zero = makeCounterBuilder.addIntConstant(0);
     uint16_t incIndex = makeCounterBuilder.addFunctionConstant(incFn);
     makeCounterBuilder.emitU16(OpCode::Constant, zero);  // slot 0: x = 0
     makeCounterBuilder.emitClosure(incIndex, {{true, 0}});
@@ -714,7 +714,7 @@ TEST_CASE("two closures over the same local share one upvalue -- a write through
 
     vm.interpret(b.build());
 
-    REQUIRE(asNumber(*vm.getGlobal("result")) == 2.0);
+    REQUIRE(asSmallInt(*vm.getGlobal("result")) == 2);
 }
 
 TEST_CASE("aggressive stress-mode collection doesn't corrupt a running program", "[vm][gc]") {
@@ -732,9 +732,9 @@ TEST_CASE("aggressive stress-mode collection doesn't corrupt a running program",
     ObjFunction* getFn = fnBuilder.build(0, "get");
 
     ChunkBuilder b(vm);
-    uint16_t fortyTwo = b.addNumberConstant(42);
-    uint16_t one = b.addNumberConstant(1);
-    uint16_t two = b.addNumberConstant(2);
+    uint16_t fortyTwo = b.addIntConstant(42);
+    uint16_t one = b.addIntConstant(1);
+    uint16_t two = b.addIntConstant(2);
     uint16_t getIndex = b.addFunctionConstant(getFn);
     uint16_t label = b.addStringConstant("a label, just to allocate a string");
     uint16_t result = b.addStringConstant("result");
@@ -753,7 +753,7 @@ TEST_CASE("aggressive stress-mode collection doesn't corrupt a running program",
 
     vm.interpret(b.build());
 
-    REQUIRE(asNumber(*vm.getGlobal("result")) == 84.0);
+    REQUIRE(asSmallInt(*vm.getGlobal("result")) == 84);
 }
 
 TEST_CASE("print and concat are present as globals without any user declaration", "[vm][natives]") {
@@ -787,7 +787,7 @@ TEST_CASE("concat joins stringify of each element with no separator", "[vm][nati
     Vm vm;
     ChunkBuilder b(vm);
     uint16_t concatName = b.addStringConstant("concat");
-    uint16_t one = b.addNumberConstant(1);
+    uint16_t one = b.addIntConstant(1);
     uint16_t a = b.addStringConstant("a");
     uint16_t result = b.addStringConstant("result");
 
@@ -813,7 +813,7 @@ TEST_CASE("concat with a non-vector argument is a clean runtime error, not a cra
     Vm vm;
     ChunkBuilder b(vm);
     uint16_t concatName = b.addStringConstant("concat");
-    uint16_t five = b.addNumberConstant(5);
+    uint16_t five = b.addIntConstant(5);
 
     b.emitU16(OpCode::GetGlobal, concatName);
     b.emitU16(OpCode::Constant, five);
@@ -837,8 +837,8 @@ TEST_CASE("push appends in place and returns nil", "[vm][natives]") {
     Vm vm;
     ChunkBuilder b(vm);
     uint16_t pushName = b.addStringConstant("push");
-    uint16_t one = b.addNumberConstant(1);
-    uint16_t two = b.addNumberConstant(2);
+    uint16_t one = b.addIntConstant(1);
+    uint16_t two = b.addIntConstant(2);
     uint16_t vName = b.addStringConstant("v");
     uint16_t pushResult = b.addStringConstant("pushResult");
 
@@ -858,15 +858,15 @@ TEST_CASE("push appends in place and returns nil", "[vm][natives]") {
     const Value* vVal = vm.getGlobal("v");
     auto& elements = static_cast<ObjVector*>(asObj(*vVal))->elements;
     REQUIRE(elements.size() == 2);
-    REQUIRE(asNumber(elements[0]) == 1.0);
-    REQUIRE(asNumber(elements[1]) == 2.0);
+    REQUIRE(asSmallInt(elements[0]) == 1);
+    REQUIRE(asSmallInt(elements[1]) == 2);
 }
 
 TEST_CASE("push on a non-vector is a runtime error", "[vm][natives]") {
     Vm vm;
     ChunkBuilder b(vm);
     uint16_t pushName = b.addStringConstant("push");
-    uint16_t one = b.addNumberConstant(1);
+    uint16_t one = b.addIntConstant(1);
 
     b.emitU16(OpCode::GetGlobal, pushName);
     b.emitU16(OpCode::Constant, one);  // receiver = 1, not a vector
@@ -880,8 +880,8 @@ TEST_CASE("pop removes and returns the last element in place", "[vm][natives]") 
     Vm vm;
     ChunkBuilder b(vm);
     uint16_t popName = b.addStringConstant("pop");
-    uint16_t one = b.addNumberConstant(1);
-    uint16_t two = b.addNumberConstant(2);
+    uint16_t one = b.addIntConstant(1);
+    uint16_t two = b.addIntConstant(2);
     uint16_t vName = b.addStringConstant("v");
     uint16_t popResult = b.addStringConstant("popResult");
 
@@ -897,11 +897,11 @@ TEST_CASE("pop removes and returns the last element in place", "[vm][natives]") 
 
     vm.interpret(b.build());
 
-    REQUIRE(asNumber(*vm.getGlobal("popResult")) == 2.0);
+    REQUIRE(asSmallInt(*vm.getGlobal("popResult")) == 2);
     const Value* vVal = vm.getGlobal("v");
     auto& elements = static_cast<ObjVector*>(asObj(*vVal))->elements;
     REQUIRE(elements.size() == 1);
-    REQUIRE(asNumber(elements[0]) == 1.0);
+    REQUIRE(asSmallInt(elements[0]) == 1);
 }
 
 TEST_CASE("pop from an empty vector is a runtime error", "[vm][natives]") {
@@ -920,7 +920,7 @@ TEST_CASE("pop on a non-vector is a runtime error", "[vm][natives]") {
     Vm vm;
     ChunkBuilder b(vm);
     uint16_t popName = b.addStringConstant("pop");
-    uint16_t one = b.addNumberConstant(1);
+    uint16_t one = b.addIntConstant(1);
 
     b.emitU16(OpCode::GetGlobal, popName);
     b.emitU16(OpCode::Constant, one);
@@ -933,9 +933,9 @@ TEST_CASE("length returns the element count, first user-facing exposure of Vecto
     Vm vm;
     ChunkBuilder b(vm);
     uint16_t lengthName = b.addStringConstant("length");
-    uint16_t one = b.addNumberConstant(1);
-    uint16_t two = b.addNumberConstant(2);
-    uint16_t three = b.addNumberConstant(3);
+    uint16_t one = b.addIntConstant(1);
+    uint16_t two = b.addIntConstant(2);
+    uint16_t three = b.addIntConstant(3);
     uint16_t result = b.addStringConstant("result");
 
     b.emitU16(OpCode::GetGlobal, lengthName);
@@ -948,14 +948,14 @@ TEST_CASE("length returns the element count, first user-facing exposure of Vecto
 
     vm.interpret(b.build());
 
-    REQUIRE(asNumber(*vm.getGlobal("result")) == 3.0);
+    REQUIRE(asSmallInt(*vm.getGlobal("result")) == 3);
 }
 
 TEST_CASE("length on a non-vector is a runtime error", "[vm][natives]") {
     Vm vm;
     ChunkBuilder b(vm);
     uint16_t lengthName = b.addStringConstant("length");
-    uint16_t one = b.addNumberConstant(1);
+    uint16_t one = b.addIntConstant(1);
 
     b.emitU16(OpCode::GetGlobal, lengthName);
     b.emitU16(OpCode::Constant, one);
@@ -970,9 +970,9 @@ TEST_CASE("reverse returns a new vector, leaving the original untouched", "[vm][
     Vm vm;
     ChunkBuilder b(vm);
     uint16_t reverseName = b.addStringConstant("reverse");
-    uint16_t one = b.addNumberConstant(1);
-    uint16_t two = b.addNumberConstant(2);
-    uint16_t three = b.addNumberConstant(3);
+    uint16_t one = b.addIntConstant(1);
+    uint16_t two = b.addIntConstant(2);
+    uint16_t three = b.addIntConstant(3);
     uint16_t vName = b.addStringConstant("v");
     uint16_t result = b.addStringConstant("result");
 
@@ -992,23 +992,23 @@ TEST_CASE("reverse returns a new vector, leaving the original untouched", "[vm][
     const Value* resultVal = vm.getGlobal("result");
     auto& reversedElements = static_cast<ObjVector*>(asObj(*resultVal))->elements;
     REQUIRE(reversedElements.size() == 3);
-    REQUIRE(asNumber(reversedElements[0]) == 3.0);
-    REQUIRE(asNumber(reversedElements[1]) == 2.0);
-    REQUIRE(asNumber(reversedElements[2]) == 1.0);
+    REQUIRE(asSmallInt(reversedElements[0]) == 3);
+    REQUIRE(asSmallInt(reversedElements[1]) == 2);
+    REQUIRE(asSmallInt(reversedElements[2]) == 1);
 
     const Value* vVal = vm.getGlobal("v");
     auto& originalElements = static_cast<ObjVector*>(asObj(*vVal))->elements;
     REQUIRE(originalElements.size() == 3);
-    REQUIRE(asNumber(originalElements[0]) == 1.0);
-    REQUIRE(asNumber(originalElements[1]) == 2.0);
-    REQUIRE(asNumber(originalElements[2]) == 3.0);
+    REQUIRE(asSmallInt(originalElements[0]) == 1);
+    REQUIRE(asSmallInt(originalElements[1]) == 2);
+    REQUIRE(asSmallInt(originalElements[2]) == 3);
 }
 
 TEST_CASE("reverse on a non-vector is a runtime error", "[vm][natives]") {
     Vm vm;
     ChunkBuilder b(vm);
     uint16_t reverseName = b.addStringConstant("reverse");
-    uint16_t one = b.addNumberConstant(1);
+    uint16_t one = b.addIntConstant(1);
 
     b.emitU16(OpCode::GetGlobal, reverseName);
     b.emitU16(OpCode::Constant, one);
@@ -1032,12 +1032,12 @@ TEST_CASE("transpose swaps rows and columns, returning a new matrix", "[vm][nati
     Vm vm;
     ChunkBuilder b(vm);
     uint16_t transposeName = b.addStringConstant("transpose");
-    uint16_t one = b.addNumberConstant(1);
-    uint16_t two = b.addNumberConstant(2);
-    uint16_t three = b.addNumberConstant(3);
-    uint16_t four = b.addNumberConstant(4);
-    uint16_t five = b.addNumberConstant(5);
-    uint16_t six = b.addNumberConstant(6);
+    uint16_t one = b.addIntConstant(1);
+    uint16_t two = b.addIntConstant(2);
+    uint16_t three = b.addIntConstant(3);
+    uint16_t four = b.addIntConstant(4);
+    uint16_t five = b.addIntConstant(5);
+    uint16_t six = b.addIntConstant(6);
     uint16_t result = b.addStringConstant("result");
 
     b.emitU16(OpCode::GetGlobal, transposeName);
@@ -1062,18 +1062,18 @@ TEST_CASE("transpose swaps rows and columns, returning a new matrix", "[vm][nati
     REQUIRE(rows.size() == 3);  // 2x3 transposed is 3x2
     auto& row0 = static_cast<ObjVector*>(asObj(rows[0]))->elements;
     REQUIRE(row0.size() == 2);
-    REQUIRE(asNumber(row0[0]) == 1.0);
-    REQUIRE(asNumber(row0[1]) == 4.0);
+    REQUIRE(asSmallInt(row0[0]) == 1);
+    REQUIRE(asSmallInt(row0[1]) == 4);
     auto& row2 = static_cast<ObjVector*>(asObj(rows[2]))->elements;
-    REQUIRE(asNumber(row2[0]) == 3.0);
-    REQUIRE(asNumber(row2[1]) == 6.0);
+    REQUIRE(asSmallInt(row2[0]) == 3);
+    REQUIRE(asSmallInt(row2[1]) == 6);
 }
 
 TEST_CASE("transpose on a non-vector is a runtime error", "[vm][natives]") {
     Vm vm;
     ChunkBuilder b(vm);
     uint16_t transposeName = b.addStringConstant("transpose");
-    uint16_t one = b.addNumberConstant(1);
+    uint16_t one = b.addIntConstant(1);
 
     b.emitU16(OpCode::GetGlobal, transposeName);
     b.emitU16(OpCode::Constant, one);
@@ -1086,8 +1086,8 @@ TEST_CASE("transpose on a ragged (non-rectangular) matrix is a runtime error", "
     Vm vm;
     ChunkBuilder b(vm);
     uint16_t transposeName = b.addStringConstant("transpose");
-    uint16_t one = b.addNumberConstant(1);
-    uint16_t two = b.addNumberConstant(2);
+    uint16_t one = b.addIntConstant(1);
+    uint16_t two = b.addIntConstant(2);
 
     b.emitU16(OpCode::GetGlobal, transposeName);
     // [[1, 2], [1]] -- rows of different lengths
@@ -1106,14 +1106,14 @@ TEST_CASE("multiply computes the true matrix product, not an elementwise one", "
     Vm vm;
     ChunkBuilder b(vm);
     uint16_t multiplyName = b.addStringConstant("multiply");
-    uint16_t one = b.addNumberConstant(1);
-    uint16_t two = b.addNumberConstant(2);
-    uint16_t three = b.addNumberConstant(3);
-    uint16_t four = b.addNumberConstant(4);
-    uint16_t five = b.addNumberConstant(5);
-    uint16_t six = b.addNumberConstant(6);
-    uint16_t seven = b.addNumberConstant(7);
-    uint16_t eight = b.addNumberConstant(8);
+    uint16_t one = b.addIntConstant(1);
+    uint16_t two = b.addIntConstant(2);
+    uint16_t three = b.addIntConstant(3);
+    uint16_t four = b.addIntConstant(4);
+    uint16_t five = b.addIntConstant(5);
+    uint16_t six = b.addIntConstant(6);
+    uint16_t seven = b.addIntConstant(7);
+    uint16_t eight = b.addIntConstant(8);
     uint16_t result = b.addStringConstant("result");
 
     b.emitU16(OpCode::GetGlobal, multiplyName);
@@ -1144,21 +1144,21 @@ TEST_CASE("multiply computes the true matrix product, not an elementwise one", "
     auto& rows = static_cast<ObjVector*>(asObj(*resultVal))->elements;
     REQUIRE(rows.size() == 2);
     auto& row0 = static_cast<ObjVector*>(asObj(rows[0]))->elements;
-    REQUIRE(asNumber(row0[0]) == 19.0);
-    REQUIRE(asNumber(row0[1]) == 22.0);
+    REQUIRE(asSmallInt(row0[0]) == 19);
+    REQUIRE(asSmallInt(row0[1]) == 22);
     auto& row1 = static_cast<ObjVector*>(asObj(rows[1]))->elements;
-    REQUIRE(asNumber(row1[0]) == 43.0);
-    REQUIRE(asNumber(row1[1]) == 50.0);
+    REQUIRE(asSmallInt(row1[0]) == 43);
+    REQUIRE(asSmallInt(row1[1]) == 50);
 }
 
 TEST_CASE("add computes the elementwise sum and doesn't mutate either argument", "[vm][natives]") {
     Vm vm;
     ChunkBuilder b(vm);
     uint16_t addName = b.addStringConstant("add");
-    uint16_t one = b.addNumberConstant(1);
-    uint16_t two = b.addNumberConstant(2);
-    uint16_t three = b.addNumberConstant(3);
-    uint16_t four = b.addNumberConstant(4);
+    uint16_t one = b.addIntConstant(1);
+    uint16_t two = b.addIntConstant(2);
+    uint16_t three = b.addIntConstant(3);
+    uint16_t four = b.addIntConstant(4);
     uint16_t aName = b.addStringConstant("a");
     uint16_t bName = b.addStringConstant("b");
     uint16_t result = b.addStringConstant("result");
@@ -1185,22 +1185,22 @@ TEST_CASE("add computes the elementwise sum and doesn't mutate either argument",
 
     const Value* resultVal = vm.getGlobal("result");
     auto& resultRow = static_cast<ObjVector*>(asObj(static_cast<ObjVector*>(asObj(*resultVal))->elements[0]))->elements;
-    REQUIRE(asNumber(resultRow[0]) == 4.0);
-    REQUIRE(asNumber(resultRow[1]) == 6.0);
+    REQUIRE(asSmallInt(resultRow[0]) == 4);
+    REQUIRE(asSmallInt(resultRow[1]) == 6);
 
     // Neither original argument was mutated.
     const Value* aVal = vm.getGlobal("a");
     auto& aRow = static_cast<ObjVector*>(asObj(static_cast<ObjVector*>(asObj(*aVal))->elements[0]))->elements;
-    REQUIRE(asNumber(aRow[0]) == 1.0);
-    REQUIRE(asNumber(aRow[1]) == 2.0);
+    REQUIRE(asSmallInt(aRow[0]) == 1);
+    REQUIRE(asSmallInt(aRow[1]) == 2);
 }
 
 TEST_CASE("add with mismatched shapes is a runtime error", "[vm][natives]") {
     Vm vm;
     ChunkBuilder b(vm);
     uint16_t addName = b.addStringConstant("add");
-    uint16_t one = b.addNumberConstant(1);
-    uint16_t two = b.addNumberConstant(2);
+    uint16_t one = b.addIntConstant(1);
+    uint16_t two = b.addIntConstant(2);
 
     b.emitU16(OpCode::GetGlobal, addName);
     // a = [[1, 2]] (1x2), b = [[1]] (1x1)
@@ -1220,8 +1220,8 @@ TEST_CASE("subtract computes the elementwise difference, a minus b", "[vm][nativ
     Vm vm;
     ChunkBuilder b(vm);
     uint16_t subtractName = b.addStringConstant("subtract");
-    uint16_t five = b.addNumberConstant(5);
-    uint16_t two = b.addNumberConstant(2);
+    uint16_t five = b.addIntConstant(5);
+    uint16_t two = b.addIntConstant(2);
     uint16_t result = b.addStringConstant("result");
 
     b.emitU16(OpCode::GetGlobal, subtractName);
@@ -1239,14 +1239,14 @@ TEST_CASE("subtract computes the elementwise difference, a minus b", "[vm][nativ
 
     const Value* resultVal = vm.getGlobal("result");
     auto& row = static_cast<ObjVector*>(asObj(static_cast<ObjVector*>(asObj(*resultVal))->elements[0]))->elements;
-    REQUIRE(asNumber(row[0]) == 3.0);  // 5 - 2
+    REQUIRE(asSmallInt(row[0]) == 3);  // 5 - 2
 }
 
 TEST_CASE("multiply with incompatible dimensions is a runtime error", "[vm][natives]") {
     Vm vm;
     ChunkBuilder b(vm);
     uint16_t multiplyName = b.addStringConstant("multiply");
-    uint16_t one = b.addNumberConstant(1);
+    uint16_t one = b.addIntConstant(1);
 
     b.emitU16(OpCode::GetGlobal, multiplyName);
     // a = [[1, 1]] (1x2), b = [[1, 1]] (1x2) -- a's cols (2) != b's rows (1)
@@ -1270,9 +1270,9 @@ TEST_CASE("VectorLength pushes the element count of a vector", "[vm]") {
     // since no user-written Iqalox program can reach it any other way.
     Vm vm;
     ChunkBuilder b(vm);
-    uint16_t one = b.addNumberConstant(1);
-    uint16_t two = b.addNumberConstant(2);
-    uint16_t three = b.addNumberConstant(3);
+    uint16_t one = b.addIntConstant(1);
+    uint16_t two = b.addIntConstant(2);
+    uint16_t three = b.addIntConstant(3);
     uint16_t result = b.addStringConstant("result");
 
     b.emitU16(OpCode::Constant, one);
@@ -1284,13 +1284,13 @@ TEST_CASE("VectorLength pushes the element count of a vector", "[vm]") {
 
     vm.interpret(b.build());
 
-    REQUIRE(asNumber(*vm.getGlobal("result")) == 3.0);
+    REQUIRE(asSmallInt(*vm.getGlobal("result")) == 3);
 }
 
 TEST_CASE("VectorLength on a non-vector is a runtime error", "[vm]") {
     Vm vm;
     ChunkBuilder b(vm);
-    uint16_t one = b.addNumberConstant(1);
+    uint16_t one = b.addIntConstant(1);
     b.emitU16(OpCode::Constant, one);
     b.emit(OpCode::VectorLength);
 
@@ -1300,8 +1300,8 @@ TEST_CASE("VectorLength on a non-vector is a runtime error", "[vm]") {
 TEST_CASE("VectorAppend mutates the vector in place and pushes nothing back", "[vm]") {
     Vm vm;
     ChunkBuilder b(vm);
-    uint16_t one = b.addNumberConstant(1);
-    uint16_t two = b.addNumberConstant(2);
+    uint16_t one = b.addIntConstant(1);
+    uint16_t two = b.addIntConstant(2);
     uint16_t vName = b.addStringConstant("v");
     uint16_t lengthName = b.addStringConstant("length");
 
@@ -1319,10 +1319,10 @@ TEST_CASE("VectorAppend mutates the vector in place and pushes nothing back", "[
 
     vm.interpret(b.build());
 
-    REQUIRE(asNumber(*vm.getGlobal("length")) == 2.0);
+    REQUIRE(asSmallInt(*vm.getGlobal("length")) == 2);
     const Value* vVal = vm.getGlobal("v");
     REQUIRE(static_cast<ObjVector*>(asObj(*vVal))->elements.size() == 2);
-    REQUIRE(asNumber(static_cast<ObjVector*>(asObj(*vVal))->elements[1]) == 2.0);
+    REQUIRE(asSmallInt(static_cast<ObjVector*>(asObj(*vVal))->elements[1]) == 2);
 }
 
 TEST_CASE("VectorAppend's mutation is visible through every other reference to the same vector", "[vm]") {
@@ -1332,8 +1332,8 @@ TEST_CASE("VectorAppend's mutation is visible through every other reference to t
     // without ever needing to store it back.
     Vm vm;
     ChunkBuilder b(vm);
-    uint16_t one = b.addNumberConstant(1);
-    uint16_t two = b.addNumberConstant(2);
+    uint16_t one = b.addIntConstant(1);
+    uint16_t two = b.addIntConstant(2);
     uint16_t aliasLength = b.addStringConstant("aliasLength");
 
     b.emitU16(OpCode::Constant, one);
@@ -1350,14 +1350,14 @@ TEST_CASE("VectorAppend's mutation is visible through every other reference to t
 
     vm.interpret(b.build());
 
-    REQUIRE(asNumber(*vm.getGlobal("aliasLength")) == 2.0);
+    REQUIRE(asSmallInt(*vm.getGlobal("aliasLength")) == 2);
 }
 
 TEST_CASE("VectorAppend on a non-vector is a runtime error", "[vm]") {
     Vm vm;
     ChunkBuilder b(vm);
-    uint16_t one = b.addNumberConstant(1);
-    uint16_t two = b.addNumberConstant(2);
+    uint16_t one = b.addIntConstant(1);
+    uint16_t two = b.addIntConstant(2);
     b.emitU16(OpCode::Constant, one);  // receiver = 1, not a vector
     b.emitU16(OpCode::Constant, two);
     b.emit(OpCode::VectorAppend);
@@ -1382,8 +1382,8 @@ TEST_CASE("end-to-end: a cons call builds [item, ...list] via a synthetic closur
     //     return $result
     // }
     ChunkBuilder consBuilder(vm);
-    uint16_t zero = consBuilder.addNumberConstant(0);
-    uint16_t one = consBuilder.addNumberConstant(1);
+    uint16_t zero = consBuilder.addIntConstant(0);
+    uint16_t one = consBuilder.addIntConstant(1);
     consBuilder.emitU16(OpCode::GetLocal, 0);  // $item
     consBuilder.emitU16(OpCode::BuildVector, 1);  // $result (slot 2) = [$item]
     consBuilder.emitU16(OpCode::Constant, zero);  // $index (slot 3) = 0
@@ -1415,9 +1415,9 @@ TEST_CASE("end-to-end: a cons call builds [item, ...list] via a synthetic closur
 
     ChunkBuilder b(vm);
     uint16_t consIndex = b.addFunctionConstant(consFn);
-    uint16_t itemVal = b.addNumberConstant(1);
-    uint16_t tailA = b.addNumberConstant(2);
-    uint16_t tailB = b.addNumberConstant(3);
+    uint16_t itemVal = b.addIntConstant(1);
+    uint16_t tailA = b.addIntConstant(2);
+    uint16_t tailB = b.addIntConstant(3);
     uint16_t result = b.addStringConstant("result");
 
     b.emitClosure(consIndex, {});
@@ -1434,9 +1434,9 @@ TEST_CASE("end-to-end: a cons call builds [item, ...list] via a synthetic closur
     REQUIRE(isObj(*resultVal));
     auto& elements = static_cast<ObjVector*>(asObj(*resultVal))->elements;
     REQUIRE(elements.size() == 3);
-    REQUIRE(asNumber(elements[0]) == 1.0);
-    REQUIRE(asNumber(elements[1]) == 2.0);
-    REQUIRE(asNumber(elements[2]) == 3.0);
+    REQUIRE(asSmallInt(elements[0]) == 1);
+    REQUIRE(asSmallInt(elements[1]) == 2);
+    REQUIRE(asSmallInt(elements[2]) == 3);
 }
 
 TEST_CASE("end-to-end: consing onto an empty list produces a single-element vector", "[vm]") {
@@ -1447,8 +1447,8 @@ TEST_CASE("end-to-end: consing onto an empty list produces a single-element vect
     Vm vm;
 
     ChunkBuilder consBuilder(vm);
-    uint16_t zero = consBuilder.addNumberConstant(0);
-    uint16_t one = consBuilder.addNumberConstant(1);
+    uint16_t zero = consBuilder.addIntConstant(0);
+    uint16_t one = consBuilder.addIntConstant(1);
     consBuilder.emitU16(OpCode::GetLocal, 0);
     consBuilder.emitU16(OpCode::BuildVector, 1);
     consBuilder.emitU16(OpCode::Constant, zero);
@@ -1480,7 +1480,7 @@ TEST_CASE("end-to-end: consing onto an empty list produces a single-element vect
 
     ChunkBuilder b(vm);
     uint16_t consIndex = b.addFunctionConstant(consFn);
-    uint16_t itemVal = b.addNumberConstant(1);
+    uint16_t itemVal = b.addIntConstant(1);
     uint16_t result = b.addStringConstant("result");
 
     // print(item) as a preceding call, matching the original failing
@@ -1499,7 +1499,7 @@ TEST_CASE("end-to-end: consing onto an empty list produces a single-element vect
     REQUIRE(isObj(*resultVal));
     auto& elements = static_cast<ObjVector*>(asObj(*resultVal))->elements;
     REQUIRE(elements.size() == 1);
-    REQUIRE(asNumber(elements[0]) == 1.0);
+    REQUIRE(asSmallInt(elements[0]) == 1);
 }
 
 TEST_CASE("VectorExtend appends every element of the source onto the target and pushes the target back", "[vm]") {
@@ -1509,9 +1509,9 @@ TEST_CASE("VectorExtend appends every element of the source onto the target and 
     // from between chained spreads/plain elements).
     Vm vm;
     ChunkBuilder b(vm);
-    uint16_t one = b.addNumberConstant(1);
-    uint16_t two = b.addNumberConstant(2);
-    uint16_t three = b.addNumberConstant(3);
+    uint16_t one = b.addIntConstant(1);
+    uint16_t two = b.addIntConstant(2);
+    uint16_t three = b.addIntConstant(3);
     uint16_t result = b.addStringConstant("result");
 
     b.emitU16(OpCode::BuildVector, 0);  // target = []
@@ -1528,17 +1528,17 @@ TEST_CASE("VectorExtend appends every element of the source onto the target and 
     REQUIRE(isObj(*resultVal));
     auto& elements = static_cast<ObjVector*>(asObj(*resultVal))->elements;
     REQUIRE(elements.size() == 3);
-    REQUIRE(asNumber(elements[0]) == 1.0);
-    REQUIRE(asNumber(elements[1]) == 2.0);
-    REQUIRE(asNumber(elements[2]) == 3.0);
+    REQUIRE(asSmallInt(elements[0]) == 1);
+    REQUIRE(asSmallInt(elements[1]) == 2);
+    REQUIRE(asSmallInt(elements[2]) == 3);
 }
 
 TEST_CASE("VectorExtend chains: several extends in a row build up the same target vector", "[vm]") {
     Vm vm;
     ChunkBuilder b(vm);
-    uint16_t one = b.addNumberConstant(1);
-    uint16_t two = b.addNumberConstant(2);
-    uint16_t three = b.addNumberConstant(3);
+    uint16_t one = b.addIntConstant(1);
+    uint16_t two = b.addIntConstant(2);
+    uint16_t three = b.addIntConstant(3);
     uint16_t result = b.addStringConstant("result");
 
     b.emitU16(OpCode::BuildVector, 0);  // target = []
@@ -1556,9 +1556,9 @@ TEST_CASE("VectorExtend chains: several extends in a row build up the same targe
     const Value* resultVal = vm.getGlobal("result");
     auto& elements = static_cast<ObjVector*>(asObj(*resultVal))->elements;
     REQUIRE(elements.size() == 3);
-    REQUIRE(asNumber(elements[0]) == 1.0);
-    REQUIRE(asNumber(elements[1]) == 2.0);
-    REQUIRE(asNumber(elements[2]) == 3.0);
+    REQUIRE(asSmallInt(elements[0]) == 1);
+    REQUIRE(asSmallInt(elements[1]) == 2);
+    REQUIRE(asSmallInt(elements[2]) == 3);
 }
 
 TEST_CASE("VectorExtend with a non-vector source is a user-facing runtime error", "[vm]") {
@@ -1567,7 +1567,7 @@ TEST_CASE("VectorExtend with a non-vector source is a user-facing runtime error"
     // is exactly what `[...5]` produces -- a real, user-facing type error.
     Vm vm;
     ChunkBuilder b(vm);
-    uint16_t five = b.addNumberConstant(5);
+    uint16_t five = b.addIntConstant(5);
 
     b.emitU16(OpCode::BuildVector, 0);  // target = []
     b.emitU16(OpCode::Constant, five);  // source = 5, not a vector
@@ -1585,10 +1585,10 @@ TEST_CASE("end-to-end: a vector literal with a spread element flattens purely on
     // Cons/ListComprehension before their synthetic-closure fix).
     Vm vm;
     ChunkBuilder b(vm);
-    uint16_t zero = b.addNumberConstant(0);
-    uint16_t one = b.addNumberConstant(1);
-    uint16_t two = b.addNumberConstant(2);
-    uint16_t five = b.addNumberConstant(5);
+    uint16_t zero = b.addIntConstant(0);
+    uint16_t one = b.addIntConstant(1);
+    uint16_t two = b.addIntConstant(2);
+    uint16_t five = b.addIntConstant(5);
     uint16_t aName = b.addStringConstant("a");
     uint16_t result = b.addStringConstant("result");
 
@@ -1614,10 +1614,10 @@ TEST_CASE("end-to-end: a vector literal with a spread element flattens purely on
     REQUIRE(isObj(*resultVal));
     auto& elements = static_cast<ObjVector*>(asObj(*resultVal))->elements;
     REQUIRE(elements.size() == 4);
-    REQUIRE(asNumber(elements[0]) == 0.0);
-    REQUIRE(asNumber(elements[1]) == 1.0);
-    REQUIRE(asNumber(elements[2]) == 2.0);
-    REQUIRE(asNumber(elements[3]) == 5.0);
+    REQUIRE(asSmallInt(elements[0]) == 0);
+    REQUIRE(asSmallInt(elements[1]) == 1);
+    REQUIRE(asSmallInt(elements[2]) == 2);
+    REQUIRE(asSmallInt(elements[3]) == 5);
 }
 
 TEST_CASE("calling print with the wrong argument count is a runtime error", "[vm][natives]") {
@@ -1635,8 +1635,8 @@ TEST_CASE("a runtime error names the source file when the program has a file tab
     Vm vm;
     vm.sourceFiles = {"main.iqx", "math/vector.iqx"};
     ChunkBuilder b(vm);
-    uint16_t one = b.addNumberConstant(1);
-    uint16_t zero = b.addNumberConstant(0);
+    uint16_t one = b.addIntConstant(1);
+    uint16_t zero = b.addIntConstant(0);
     b.emitU16(OpCode::Constant, one);
     b.emitU16(OpCode::Constant, zero);
     b.emit(OpCode::Divide);  // byte 6
@@ -1659,8 +1659,8 @@ TEST_CASE("an empty file name falls back to a bare line number", "[vm]") {
     Vm vm;
     vm.sourceFiles = {""};
     ChunkBuilder b(vm);
-    uint16_t one = b.addNumberConstant(1);
-    uint16_t zero = b.addNumberConstant(0);
+    uint16_t one = b.addIntConstant(1);
+    uint16_t zero = b.addIntConstant(0);
     b.emitU16(OpCode::Constant, one);
     b.emitU16(OpCode::Constant, zero);
     b.emit(OpCode::Divide);
@@ -1682,7 +1682,7 @@ TEST_CASE("a type-check fault (non-number operand) also reports its source locat
     Vm vm;
     vm.sourceFiles = {"main.iqx"};
     ChunkBuilder b(vm);
-    uint16_t one = b.addNumberConstant(1);
+    uint16_t one = b.addIntConstant(1);
     b.emitU16(OpCode::Constant, one);
     b.emit(OpCode::Nil);
     b.emit(OpCode::Subtract);  // byte 4: number - nil

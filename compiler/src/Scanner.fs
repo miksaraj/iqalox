@@ -90,6 +90,17 @@ let private isDigit (c: char) = c >= '0' && c <= '9'
 let private isAlpha (c: char) = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c = '_'
 let private isAlphaNumeric (c: char) = isAlpha c || isDigit c
 
+/// Characters that can end an expression when directly adjacent (no
+/// whitespace) to what follows: an identifier or number, a closing
+/// bracket, or a string's closing quote.
+let private endsExpression (c: char) =
+    isAlphaNumeric c || c = ')' || c = ']' || c = '}' || c = '"' || c = '\''
+
+/// The largest exact integer Iqalox computes, in bits: 2^26 bits, about 20
+/// million decimal digits (`docs/PLAN-0.4.md` Phase 1). A literal beyond it
+/// is a compile-time error; the VM enforces the same limit on results.
+let maxIntegerBits = 1 <<< 26
+
 /// Recognized escape sequences (decision 5, docs/PLAN-0.1.md): the common
 /// C-family set. Anything else after a backslash is a hard error -- no
 /// silent fallback to a literal backslash-plus-character.
@@ -232,14 +243,135 @@ type private ScannerState(source: string) =
         if not hadError then
             addToken String (StringLiteral(value.ToString()))
 
-    let scanNumber () =
-        while isDigit (peek ()) do
-            advance () |> ignore
-        if peek () = '.' && isDigit (peekNext ()) then
-            advance () |> ignore // consume the '.'
-            while isDigit (peek ()) do
+    /// Number literals (`docs/PLAN-0.4.md` decisions 1-2 and §2 item 1).
+    /// `first` is the already-consumed first character: a digit, or the
+    /// `.` of a leading-dot float (`.5`).
+    ///
+    /// - Integers: `42`, `1_000`, `0xFF`, `0b1010`, `0o17` (prefixes in
+    ///   either case). Exact, any size up to `maxIntegerBits`.
+    /// - Floats: anything with a decimal point (`3.14`, `.5`, `1.`) or an
+    ///   exponent (`1e9`, `2.5e-3`, `1.e5`).
+    /// - `_` separators are permissive: repeated (`1__000`) and right after a
+    ///   radix prefix (`0x_FF`) are fine. A `_` at the end of a literal, next
+    ///   to the decimal point, or next to the exponent marker is an error.
+    ///
+    /// A bad literal reports one error and produces no token, like a string
+    /// with a bad escape.
+    let scanNumber (first: char) =
+        let mutable error: string option = None
+        let fail message =
+            if error.IsNone then
+                error <- Some message
+
+        let peekAt (offset: int) =
+            if current + offset >= source.Length then '\000' else source.[current + offset]
+
+        /// Consumes digits and `_` separators; returns what was consumed.
+        let digitRun () =
+            let runStart = current
+            while isDigit (peek ()) || peek () = '_' do
                 advance () |> ignore
-        addToken Number (NumberLiteral(float (currentLexeme ())))
+            source.Substring(runStart, current - runStart)
+
+        let isRadixPrefix (c: char) =
+            c = 'x' || c = 'X' || c = 'b' || c = 'B' || c = 'o' || c = 'O'
+
+        if first = '0' && isRadixPrefix (peek ()) then
+            let prefix = System.Char.ToLowerInvariant(advance ())
+            let radix, name =
+                match prefix with
+                | 'x' -> 16, "hexadecimal"
+                | 'b' -> 2, "binary"
+                | _ -> 8, "octal"
+            // Take every alphanumeric character, so `0b102` and `0xFG` are
+            // one bad literal rather than a literal followed by an identifier.
+            let bodyStart = current
+            while isAlphaNumeric (peek ()) do
+                advance () |> ignore
+            let body = source.Substring(bodyStart, current - bodyStart)
+            let digits = body.Replace("_", "")
+            let digitValue (c: char) =
+                if isDigit c then int c - int '0'
+                elif c >= 'a' && c <= 'z' then int c - int 'a' + 10
+                elif c >= 'A' && c <= 'Z' then int c - int 'A' + 10
+                else 99
+            if digits = "" then
+                fail $"A {name} literal needs at least one digit."
+            elif body.EndsWith "_" then
+                fail "A number literal can't end with '_'."
+            else
+                match digits |> Seq.tryFind (fun c -> digitValue c >= radix) with
+                | Some bad -> fail $"Invalid digit '{bad}' in {name} literal."
+                | None ->
+                    let value = digits |> Seq.fold (fun acc c -> acc * bigint radix + bigint (digitValue c)) 0I
+                    if error.IsNone then
+                        if value.GetBitLength() > int64 maxIntegerBits then
+                            fail "Integer literal is too large."
+                        else
+                            addToken Number (IntLiteral value)
+        else
+            let mutable isFloat = false
+            // The digit run most recently consumed: a `_` at its end is only
+            // legal if more digits follow, which they never do once we stop.
+            let mutable lastRun = ""
+            if first = '.' then
+                isFloat <- true
+                lastRun <- digitRun ()
+            else
+                lastRun <- string first + digitRun ()
+                // `1.` is a float; `1..` is left alone so `...` stays a token.
+                if peek () = '.' && peekNext () <> '.' then
+                    if lastRun.EndsWith "_" then
+                        fail "'_' can't be next to the decimal point."
+                    advance () |> ignore
+                    isFloat <- true
+                    if peek () = '_' then
+                        fail "'_' can't be next to the decimal point."
+                    lastRun <- digitRun ()
+
+            let isExponentMarker (c: char) = c = 'e' || c = 'E'
+            let exponentFollows =
+                isExponentMarker (peek ())
+                && (isDigit (peekAt 1)
+                    || peekAt 1 = '_'
+                    || ((peekAt 1 = '+' || peekAt 1 = '-') && isDigit (peekAt 2)))
+            if exponentFollows then
+                if lastRun.EndsWith "_" then
+                    fail "'_' can't be next to the exponent."
+                advance () |> ignore // the 'e'
+                if peek () = '+' || peek () = '-' then
+                    advance () |> ignore
+                if peek () = '_' then
+                    fail "'_' can't be next to the exponent."
+                isFloat <- true
+                lastRun <- digitRun ()
+
+            if lastRun.EndsWith "_" then
+                fail "A number literal can't end with '_'."
+
+            if error.IsNone then
+                let text = currentLexeme().Replace("_", "")
+                if isFloat then
+                    let value =
+                        System.Double.Parse(
+                            text,
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture
+                        )
+                    if System.Double.IsInfinity value then
+                        fail "Float literal is too large."
+                    else
+                        addToken Number (FloatLiteral value)
+                else
+                    let value = System.Numerics.BigInteger.Parse(text, System.Globalization.CultureInfo.InvariantCulture)
+                    if value.GetBitLength() > int64 maxIntegerBits then
+                        fail "Integer literal is too large."
+                    else
+                        addToken Number (IntLiteral value)
+
+        match error with
+        | Some message -> addError message startLine startColumn
+        | None -> ()
 
     let scanIdentifierOrKeyword () =
         while isAlphaNumeric (peek ()) do
@@ -264,7 +396,12 @@ type private ScannerState(source: string) =
         elif c = '\'' || c = '"' then
             scanString c
         elif isDigit c then
-            scanNumber ()
+            scanNumber c
+        // `.5` is a float, but `x.5` is member access (an error later), so a
+        // leading-dot float can't follow directly after something that ends
+        // an expression. `...` is never affected: its second '.' isn't a digit.
+        elif c = '.' && isDigit (peek ()) && not (start > 0 && endsExpression source.[start - 1]) then
+            scanNumber c
         elif c = '_' then
             if isAlphaNumeric (peek ()) then
                 scanIdentifierOrKeyword ()

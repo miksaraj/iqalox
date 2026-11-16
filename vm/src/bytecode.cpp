@@ -13,9 +13,11 @@ namespace {
 
 constexpr std::array<char, 4> kMagic{'I', 'Q', 'B', 'C'};
 
-constexpr uint8_t kNumberTag = 0x00;
+constexpr uint8_t kFloatTag = 0x00;
 constexpr uint8_t kStringTag = 0x01;
 constexpr uint8_t kFunctionTag = 0x02;
+constexpr uint8_t kInt64Tag = 0x03;
+constexpr uint8_t kBigIntTag = 0x04;
 
 class Reader {
 public:
@@ -40,6 +42,14 @@ public:
                           (static_cast<uint32_t>(data_[pos_ + 3]) << 24);
         pos_ += 4;
         return value;
+    }
+
+    int64_t readI64() {
+        require(8);
+        uint64_t value = 0;
+        for (int i = 7; i >= 0; --i) value = (value << 8) | data_[pos_ + static_cast<size_t>(i)];
+        pos_ += 8;
+        return static_cast<int64_t>(value);
     }
 
     double readF64() {
@@ -84,9 +94,27 @@ Chunk readChunk(Reader& reader, Vm& vm) {
     for (uint32_t i = 0; i < constantCount; ++i) {
         uint8_t tag = reader.readU8();
         switch (tag) {
-            case kNumberTag:
-                chunk.constants.push_back(numberValue(reader.readF64()));
+            case kFloatTag:
+                chunk.constants.push_back(doubleValue(reader.readF64()));
                 break;
+            case kInt64Tag:
+                chunk.constants.push_back(smallIntValue(reader.readI64()));
+                break;
+            case kBigIntTag: {
+                bool negative = reader.readU8() != 0;
+                std::vector<uint8_t> magnitude = reader.readBytes(reader.readU32());
+                numeric::BigInt value;
+                if (!magnitude.empty()) {
+                    mpz_import(value.get(), magnitude.size(), -1, 1, 0, 0, magnitude.data());
+                }
+                if (negative) mpz_neg(value.get(), value.get());
+                try {
+                    chunk.constants.push_back(numeric::integerValue(vm, std::move(value)));
+                } catch (const RuntimeError&) {
+                    throw std::runtime_error("iqalox bytecode: integer constant exceeds the size limit");
+                }
+                break;
+            }
             case kStringTag: {
                 uint32_t length = reader.readU32();
                 auto* str = vm.allocate<ObjString>(reader.readString(length));

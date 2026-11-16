@@ -16,7 +16,8 @@ open Iqalox.Token
 type LiteralValue =
     | NilValue
     | BoolValue of bool
-    | NumberValue of float
+    | IntValue of bigint
+    | FloatValue of float
     | StringValue of string
 
 /// Case names ending in `Expr` (`BreakExpr`, `ContinueExpr`, `SelfExpr`,
