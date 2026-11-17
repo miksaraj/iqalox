@@ -292,3 +292,118 @@ TEST_CASE("big integer arithmetic and matrix natives survive stress-mode GC", "[
     REQUIRE(valuesEqual(row0[0], expected00));
     REQUIRE(valuesEqual(row1[1], expected11));
 }
+
+// --- docs/PLAN-0.4.md Phase 2: `//` and the bitwise operators ----------------
+
+TEST_CASE("integer division with // floors, for ints of any size", "[numeric][phase2]") {
+    Vm vm;
+    REQUIRE(asSmallInt(numeric::intDivide(vm, i(7), i(2))) == 3);
+    REQUIRE(asSmallInt(numeric::intDivide(vm, i(-7), i(2))) == -4);
+    REQUIRE(asSmallInt(numeric::intDivide(vm, i(7), i(-2))) == -4);
+    REQUIRE(asSmallInt(numeric::intDivide(vm, i(-7), i(-2))) == 3);
+    REQUIRE(asSmallInt(numeric::intDivide(vm, i(6), i(3))) == 2);
+    // (a // b) * b + a % b == a
+    for (int64_t a : {-7, -1, 0, 5, 13}) {
+        for (int64_t b : {-3, -1, 2, 5}) {
+            Value q = numeric::intDivide(vm, i(a), i(b));
+            Value back = numeric::add(vm, numeric::multiply(vm, q, i(b)), numeric::modulo(vm, i(a), i(b)));
+            REQUIRE(asSmallInt(back) == a);
+        }
+    }
+    // INT64_MIN // -1 doesn't fit in 64 bits.
+    REQUIRE(show(numeric::intDivide(vm, i(kMin), i(-1))) == "9223372036854775808");
+    REQUIRE(show(numeric::intDivide(vm, numeric::negate(vm, powerOfTwo(vm, 100)), i(3))) ==
+            "-422550200076076467165567735126");
+    // Integers only, and no zero divisor.
+    REQUIRE_THROWS_AS(numeric::intDivide(vm, f(7.0), i(2)), RuntimeError);
+    REQUIRE_THROWS_AS(numeric::intDivide(vm, i(7), f(2.0)), RuntimeError);
+    REQUIRE_THROWS_AS(numeric::intDivide(vm, i(7), i(0)), RuntimeError);
+    REQUIRE_THROWS_AS(numeric::intDivide(vm, powerOfTwo(vm, 100), i(0)), RuntimeError);
+}
+
+TEST_CASE("bitwise and/or/xor/not are infinite two's complement", "[numeric][phase2]") {
+    Vm vm;
+    REQUIRE(asSmallInt(numeric::bitAnd(vm, i(12), i(10))) == 8);
+    REQUIRE(asSmallInt(numeric::bitOr(vm, i(12), i(10))) == 14);
+    REQUIRE(asSmallInt(numeric::bitXor(vm, i(12), i(10))) == 6);
+    REQUIRE(asSmallInt(numeric::bitNot(vm, i(5))) == -6);
+    REQUIRE(asSmallInt(numeric::bitNot(vm, i(kMin))) == kMax);
+    REQUIRE(asSmallInt(numeric::bitAnd(vm, i(-1), i(0xFF))) == 255);
+    // Big integers, including negative ones, and results that shrink back.
+    Value big = powerOfTwo(vm, 100);
+    REQUIRE(show(numeric::bitNot(vm, big)) == "-1267650600228229401496703205377");
+    REQUIRE(asSmallInt(numeric::bitAnd(vm, numeric::add(vm, big, i(5)), i(7))) == 5);
+    REQUIRE(isSmallInt(numeric::bitAnd(vm, numeric::add(vm, big, i(5)), i(7))));
+    REQUIRE(valuesEqual(numeric::bitOr(vm, big, i(1)), numeric::add(vm, big, i(1))));
+    REQUIRE(asSmallInt(numeric::bitXor(vm, big, big)) == 0);
+    REQUIRE(valuesEqual(numeric::bitAnd(vm, numeric::negate(vm, big), numeric::subtract(vm, powerOfTwo(vm, 101), i(1))),
+                        big));  // -2^100 & (2^101 - 1) == 2^100
+    // Integers only.
+    REQUIRE_THROWS_AS(numeric::bitAnd(vm, i(1), f(1.0)), RuntimeError);
+    REQUIRE_THROWS_AS(numeric::bitOr(vm, boolValue(true), i(1)), RuntimeError);
+    REQUIRE_THROWS_AS(numeric::bitNot(vm, f(1.5)), RuntimeError);
+}
+
+TEST_CASE("shifts are arithmetic, exact, and bounded", "[numeric][phase2]") {
+    Vm vm;
+    REQUIRE(show(numeric::shiftLeft(vm, i(1), i(100))) == "1267650600228229401496703205376");
+    REQUIRE(asSmallInt(numeric::shiftLeft(vm, i(-3), i(2))) == -12);
+    REQUIRE(asSmallInt(numeric::shiftRight(vm, i(-8), i(1))) == -4);
+    REQUIRE(asSmallInt(numeric::shiftRight(vm, i(-7), i(1))) == -4);  // floored
+    REQUIRE(asSmallInt(numeric::shiftRight(vm, i(7), i(1))) == 3);
+    REQUIRE(asSmallInt(numeric::shiftRight(vm, i(-1), i(1000))) == -1);
+    REQUIRE(asSmallInt(numeric::shiftRight(vm, i(5), powerOfTwo(vm, 100))) == 0);
+    REQUIRE(asSmallInt(numeric::shiftRight(vm, powerOfTwo(vm, 100), i(99))) == 2);
+    REQUIRE(asSmallInt(numeric::shiftLeft(vm, i(0), powerOfTwo(vm, 100))) == 0);
+    REQUIRE_THROWS_AS(numeric::shiftLeft(vm, i(1), i(-1)), RuntimeError);
+    REQUIRE_THROWS_AS(numeric::shiftRight(vm, i(1), i(-1)), RuntimeError);
+    REQUIRE_THROWS_AS(numeric::shiftLeft(vm, i(1), i(int64_t{1} << 30)), RuntimeError);  // size limit
+    REQUIRE_THROWS_AS(numeric::shiftLeft(vm, i(1), f(2.0)), RuntimeError);
+}
+
+TEST_CASE("the // and bitwise opcodes agree with numeric:: on fast and slow paths", "[numeric][phase2][vm]") {
+    // Each case runs one opcode on hand-built operands; the int64 cases take
+    // run()'s inline fast path, the others numericSlowPath.
+    struct Case {
+        OpCode op;
+        Value a, b;
+        std::string expected;
+    };
+    Vm values;
+    Value big = powerOfTwo(values, 70);
+    const Case cases[] = {
+        {OpCode::IntDivide, i(-7), i(2), "-4"},       {OpCode::IntDivide, i(7), i(-2), "-4"},
+        {OpCode::IntDivide, big, i(2), "590295810358705651712"},
+        {OpCode::BitAnd, i(-1), i(255), "255"},       {OpCode::BitOr, i(12), i(10), "14"},
+        {OpCode::BitXor, i(12), i(10), "6"},          {OpCode::BitXor, big, big, "0"},
+        {OpCode::ShiftLeft, i(3), i(61), "6917529027641081856"},
+        {OpCode::ShiftLeft, i(3), i(62), "13835058055282163712"},  // overflows int64: slow path
+        {OpCode::ShiftLeft, i(-1), i(63), "-9223372036854775808"},
+        {OpCode::ShiftRight, i(-8), i(1), "-4"},      {OpCode::ShiftRight, i(-1), i(100), "-1"},
+        {OpCode::ShiftRight, big, i(69), "2"},
+    };
+    for (const Case& c : cases) {
+        Vm vm;
+        ChunkBuilder b(vm);
+        uint16_t lhs = b.addValueConstant(c.a);
+        uint16_t rhs = b.addValueConstant(c.b);
+        uint16_t result = b.addStringConstant("result");
+        b.emitU16(OpCode::Constant, lhs);
+        b.emitU16(OpCode::Constant, rhs);
+        b.emit(c.op);
+        b.emitU16(OpCode::DefineGlobal, result);
+        vm.interpret(b.build());
+        INFO("opcode " << static_cast<int>(c.op) << " on " << show(c.a) << ", " << show(c.b));
+        REQUIRE(show(*vm.getGlobal("result")) == c.expected);
+    }
+
+    Vm vm;
+    ChunkBuilder b(vm);
+    uint16_t five = b.addIntConstant(5);
+    uint16_t result = b.addStringConstant("result");
+    b.emitU16(OpCode::Constant, five);
+    b.emit(OpCode::BitNot);
+    b.emitU16(OpCode::DefineGlobal, result);
+    vm.interpret(b.build());
+    REQUIRE(asSmallInt(*vm.getGlobal("result")) == -6);
+}

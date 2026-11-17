@@ -2,14 +2,11 @@
 var limit = 30000
 var firstStart = 1
 
-# Floats until integer division `//` lands (docs/PLAN-0.4.md Phase 2): `/`
-# always gives a float, and `==` never equates a float with an int, so the
-# whole chain runs on floats. Exact here: every value stays far below 2^53.
 fun chainLength(start) {
-    var n mut = start * 1.0
+    var n mut = start
     var steps mut = 1
-    for (; n != 1.0;) {
-        n = (n % 2 == 0.0) ? n / 2 : 3 * n + 1
+    for (; n != 1;) {
+        n = (n % 2 == 0) ? n // 2 : 3 * n + 1
         ++steps
     }
     return steps

@@ -101,6 +101,16 @@ enum class OpCode : uint8_t {
     // bounds and omitted bounds (encoded as `nil`) both supported. See
     // Vm::run's handler for the exact resolution/clamping rules.
     GetSlice = 0x37,
+    // docs/PLAN-0.4.md Phase 2: `//` (floored, integers only) and the bitwise
+    // operators over integers of any size (infinite two's complement).
+    // BitNot is unary `~`; the rest pop two operands.
+    IntDivide = 0x38,
+    BitAnd = 0x39,
+    BitOr = 0x3A,
+    BitXor = 0x3B,
+    BitNot = 0x3C,
+    ShiftLeft = 0x3D,
+    ShiftRight = 0x3E,
 };
 
 // Loads `path` as a format-v1 bytecode file and returns its top-level

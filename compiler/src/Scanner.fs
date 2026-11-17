@@ -58,6 +58,9 @@ let private operatorCandidates: (string * TokenType) list =
       "?:", QuestionMarkColon
       "??", DoubleQuestionMark
       "|>", Pipe
+      "//", SlashSlash
+      "<<", LessLess
+      ">>", GreaterGreater
       "(", LeftParen
       ")", RightParen
       "{", LeftBrace
@@ -71,6 +74,8 @@ let private operatorCandidates: (string * TokenType) list =
       "*", Star
       "%", Percent
       "^", Power
+      "&", Ampersand
+      "~", Tilde
       "!", Bang
       "=", Equal
       ">", Greater

@@ -287,6 +287,96 @@ Value power(Vm& vm, const Value& a, const Value& b) {
     return doubleValue(ratioToDouble(BigInt(negativeResult ? -1 : 1), denominator));
 }
 
+namespace {
+
+void requireIntegers(const Value& a, const Value& b, const char* symbol) {
+    if (!isInteger(a) || !isInteger(b)) fail(std::string("Operands of '") + symbol + "' must be integers.");
+}
+
+// The shift count as an unsigned bit count. Negative is an error; a count
+// too big for int64 is clamped (it's beyond every limit anyway).
+uint64_t shiftCount(const Value& count) {
+    if (isSmallInt(count)) {
+        if (asSmallInt(count) < 0) fail("Negative shift count.");
+        return static_cast<uint64_t>(asSmallInt(count));
+    }
+    if (mpz_sgn(bigOf(count).get()) < 0) fail("Negative shift count.");
+    return std::numeric_limits<uint64_t>::max();
+}
+
+}  // namespace
+
+Value intDivide(Vm& vm, const Value& a, const Value& b) {
+    requireIntegers(a, b, "//");
+    if (isSmallInt(a) && isSmallInt(b) && asSmallInt(b) != -1) {  // INT64_MIN // -1 overflows
+        int64_t x = asSmallInt(a), y = asSmallInt(b);
+        if (y == 0) fail("Division by zero.");
+        int64_t q = x / y;
+        if (x % y != 0 && ((x < 0) != (y < 0))) --q;  // C++ truncates; `//` floors
+        return smallIntValue(q);
+    }
+    BigInt x = toBigInt(a), y = toBigInt(b);
+    if (mpz_sgn(y.get()) == 0) fail("Division by zero.");
+    BigInt result;
+    mpz_fdiv_q(result.get(), x.get(), y.get());
+    return integerValue(vm, std::move(result));
+}
+
+Value bitAnd(Vm& vm, const Value& a, const Value& b) {
+    requireIntegers(a, b, "&");
+    if (isSmallInt(a) && isSmallInt(b)) return smallIntValue(asSmallInt(a) & asSmallInt(b));
+    BigInt result;
+    mpz_and(result.get(), toBigInt(a).get(), toBigInt(b).get());
+    return integerValue(vm, std::move(result));
+}
+
+Value bitOr(Vm& vm, const Value& a, const Value& b) {
+    requireIntegers(a, b, "|");
+    if (isSmallInt(a) && isSmallInt(b)) return smallIntValue(asSmallInt(a) | asSmallInt(b));
+    BigInt result;
+    mpz_ior(result.get(), toBigInt(a).get(), toBigInt(b).get());
+    return integerValue(vm, std::move(result));
+}
+
+Value bitXor(Vm& vm, const Value& a, const Value& b) {
+    requireIntegers(a, b, "~");
+    if (isSmallInt(a) && isSmallInt(b)) return smallIntValue(asSmallInt(a) ^ asSmallInt(b));
+    BigInt result;
+    mpz_xor(result.get(), toBigInt(a).get(), toBigInt(b).get());
+    return integerValue(vm, std::move(result));
+}
+
+Value bitNot(Vm& vm, const Value& a) {
+    if (!isInteger(a)) fail("Operand of '~' must be an integer.");
+    if (isSmallInt(a)) return smallIntValue(~asSmallInt(a));  // never overflows
+    BigInt result;
+    mpz_com(result.get(), bigOf(a).get());
+    return integerValue(vm, std::move(result));
+}
+
+Value shiftLeft(Vm& vm, const Value& a, const Value& b) {
+    requireIntegers(a, b, "<<");
+    uint64_t count = shiftCount(b);
+    BigInt base = toBigInt(a);
+    if (mpz_sgn(base.get()) == 0) return smallIntValue(0);
+    if (count > kMaxIntegerBits || base.bitLength() + count > kMaxIntegerBits) fail("Integer result too large.");
+    BigInt result;
+    mpz_mul_2exp(result.get(), base.get(), static_cast<mp_bitcnt_t>(count));
+    return integerValue(vm, std::move(result));
+}
+
+Value shiftRight(Vm& vm, const Value& a, const Value& b) {
+    requireIntegers(a, b, ">>");
+    uint64_t count = shiftCount(b);
+    BigInt base = toBigInt(a);
+    // Floored, like an arithmetic shift of infinite two's complement:
+    // shifting everything out leaves 0, or -1 for a negative number.
+    if (count >= base.bitLength()) return smallIntValue(mpz_sgn(base.get()) < 0 ? -1 : 0);
+    BigInt result;
+    mpz_fdiv_q_2exp(result.get(), base.get(), static_cast<mp_bitcnt_t>(count));
+    return integerValue(vm, std::move(result));
+}
+
 Value negate(Vm& vm, const Value& a) {
     if (isSmallInt(a) && asSmallInt(a) != std::numeric_limits<int64_t>::min()) return smallIntValue(-asSmallInt(a));
     if (isDouble(a)) return doubleValue(-asDouble(a));

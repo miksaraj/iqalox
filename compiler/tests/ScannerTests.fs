@@ -311,3 +311,21 @@ let ``a leading-dot float needs whitespace or punctuation before it`` () =
 let ``an e not followed by an exponent ends the number`` () =
     Assert.Equal<TokenType list>([ Number; Identifier; Eof ], tokenTypes "2each")
     Assert.Equal(IntLiteral 2I, (fst (scanTokens "2each")).[0].Literal)
+
+// --- docs/PLAN-0.4.md Phase 2: // and bitwise operator tokens ----------------
+
+[<Fact>]
+let ``integer division and bitwise operators scan as their own tokens`` () =
+    Assert.Equal<TokenType list>(
+        [ Identifier; SlashSlash; Identifier; Ampersand; Identifier; VerticalBar; Identifier; Tilde; Identifier
+          LessLess; Identifier; GreaterGreater; Identifier; Eof ],
+        tokenTypes "a // b & c | d ~ e << f >> g"
+    )
+    Assert.Equal<TokenType list>([ Tilde; Identifier; Eof ], tokenTypes "~x")
+
+[<Fact>]
+let ``longest match keeps the existing two-character operators intact`` () =
+    Assert.Equal<TokenType list>([ Identifier; Pipe; Identifier; Eof ], tokenTypes "a |> f")
+    Assert.Equal<TokenType list>([ Identifier; LeftArrow; Identifier; Eof ], tokenTypes "x <- xs")
+    Assert.Equal<TokenType list>([ Identifier; LessEqual; Identifier; Eof ], tokenTypes "a <= b")
+    Assert.Equal<TokenType list>([ Identifier; Slash; Identifier; Eof ], tokenTypes "a / b")

@@ -89,6 +89,20 @@ Value modulo(Vm& vm, const Value& a, const Value& b);
 Value power(Vm& vm, const Value& a, const Value& b);
 Value negate(Vm& vm, const Value& a);
 
+// `//` and the bitwise operators (docs/PLAN-0.4.md decisions 4 and 10).
+// Integers only: a float or any other operand is a runtime error. `//`
+// floors (`-7 // 2 == -4`); a zero divisor is "Division by zero.". The
+// bitwise operators treat integers as infinite two's complement
+// (`~5 == -6`, `-8 >> 1 == -4`, `-1 & 0xFF == 255`); a negative shift count
+// is an error, and `<<` is subject to the integer size limit.
+Value intDivide(Vm& vm, const Value& a, const Value& b);
+Value bitAnd(Vm& vm, const Value& a, const Value& b);
+Value bitOr(Vm& vm, const Value& a, const Value& b);
+Value bitXor(Vm& vm, const Value& a, const Value& b);
+Value bitNot(Vm& vm, const Value& a);
+Value shiftLeft(Vm& vm, const Value& a, const Value& b);
+Value shiftRight(Vm& vm, const Value& a, const Value& b);
+
 // Ordering for `<`, `<=`, `>`, `>=`: exact across ints and floats (no
 // rounding, no "too large" error); unordered when either side is `nan`.
 // Throws "Operands must be numbers." for a non-numeric operand.

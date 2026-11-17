@@ -186,3 +186,23 @@ let ``anything the vm might round or reject is left unfolded`` () =
     Assert.True(has ((=) Divide) (opt "var r mut = 1 / 0\nr = r"))
     // `%` and `^` are never folded.
     Assert.True(has ((=) Power) (opt "var r mut = 0 ^ -1\nr = r"))
+
+[<Fact>]
+let ``integer division and bitwise operators on literals fold exactly`` () =
+    Assert.Equal(IntConstant -4I, foldedValue "-7 // 2")
+    Assert.Equal(IntConstant 8I, foldedValue "12 & 10")
+    Assert.Equal(IntConstant 14I, foldedValue "12 | 10")
+    Assert.Equal(IntConstant 6I, foldedValue "12 ~ 10")
+    Assert.Equal(IntConstant -6I, foldedValue "~5")
+    Assert.Equal(IntConstant(bigint.Pow(2I, 100)), foldedValue "1 << 100")
+    Assert.Equal(IntConstant -4I, foldedValue "-8 >> 1")
+    Assert.Equal(IntConstant -1I, foldedValue "-1 >> 1000")
+    Assert.Equal(IntConstant 255I, foldedValue "-1 & 0xFF")
+
+[<Fact>]
+let ``what the vm must reject is left unfolded`` () =
+    Assert.True(has ((=) IntDivide) (opt "var r mut = 7 // 0\nr = r"))
+    Assert.True(has ((=) IntDivide) (opt "var r mut = 7.0 // 2\nr = r"))
+    Assert.True(has ((=) ShiftLeft) (opt "var r mut = 1 << -1\nr = r"))
+    Assert.True(has ((=) ShiftLeft) (opt "var r mut = 1 << 100000000\nr = r"))
+    Assert.True(has ((=) BitAnd) (opt "var r mut = 1.0 & 1\nr = r"))

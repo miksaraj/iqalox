@@ -135,8 +135,15 @@ let private stackEffect (instr: Instruction) : int =
     | Multiply
     | Divide
     | Modulo
-    | Power -> -1
+    | Power
+    | IntDivide
+    | BitAnd
+    | BitOr
+    | BitXor
+    | ShiftLeft
+    | ShiftRight -> -1
     | Negate
+    | BitNot
     | Not -> 0
     | Equal
     | NotEqual
@@ -303,6 +310,12 @@ type private Codegen(elideEpilogue: bool) =
             | TokenType.Slash -> Instruction.Divide
             | TokenType.Percent -> Instruction.Modulo
             | TokenType.Power -> Instruction.Power
+            | TokenType.SlashSlash -> Instruction.IntDivide
+            | TokenType.Ampersand -> Instruction.BitAnd
+            | TokenType.VerticalBar -> Instruction.BitOr
+            | TokenType.Tilde -> Instruction.BitXor
+            | TokenType.LessLess -> Instruction.ShiftLeft
+            | TokenType.GreaterGreater -> Instruction.ShiftRight
             | TokenType.EqualEqual -> Instruction.Equal
             | TokenType.BangEqual -> Instruction.NotEqual
             | TokenType.Greater -> Instruction.Greater
@@ -357,6 +370,9 @@ type private Codegen(elideEpilogue: bool) =
             | Minus ->
                 this.CompileExpr right
                 state.Emit Negate |> ignore
+            | Tilde ->
+                this.CompileExpr right
+                state.Emit BitNot |> ignore
             | PlusPlus
             | MinusMinus ->
                 match right with

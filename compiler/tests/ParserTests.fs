@@ -849,3 +849,58 @@ let ``a trailing comma in a brace group is a parse error`` () =
 let ``a real semicolon inside a brace group is not swallowed`` () =
     let _, errors = parseWithErrors "import std.matrix.{add; transpose}"
     Assert.NotEmpty errors
+
+// --- docs/PLAN-0.4.md Phase 2: // and bitwise operators ---------------------
+
+/// A compact rendering of an expression's structure, fully parenthesised.
+let rec private shape (e: Expr) : string =
+    match e with
+    | Binary(l, op, r) -> $"({shape l} {op.Lexeme} {shape r})"
+    | Unary(op, r) -> $"({op.Lexeme}{shape r})"
+    | Literal(IntValue n) -> string n
+    | Variable t -> t.Lexeme
+    | Grouping inner -> shape inner
+    | Vector items -> "[" + (items |> List.map shape |> String.concat ", ") + "]"
+    | Cons(head, tail, _) -> $"[{shape head} | {shape tail}]"
+    | ListComprehension(body, _, Some guard, _) -> $"[{shape body} | ... | {shape guard}]"
+    | Index(o, i, _) -> $"{shape o}[{shape i}]"
+    | Call(f, args) -> $"call({shape f}: " + (args |> List.map shape |> String.concat ", ") + ")"
+    | other -> failwith $"shape: unexpected %A{other}"
+
+[<Fact>]
+let ``bitwise operators bind tighter than comparisons, Python-style`` () =
+    Assert.Equal("((x & 1) == 0)", shape (singleExpr "x & 1 == 0"))
+    Assert.Equal("((a | b) < c)", shape (singleExpr "a | b < c"))
+
+[<Fact>]
+let ``the bitwise levels run shift, and, xor, or from tightest`` () =
+    Assert.Equal("(a | (b ~ (c & (d << (e + f)))))", shape (singleExpr "a | b ~ c & d << e + f"))
+    Assert.Equal("((((a << 1) >> 2) & 3) | 4)", shape (singleExpr "a << 1 >> 2 & 3 | 4"))
+
+[<Fact>]
+let ``integer division shares the multiplicative level and associates left`` () =
+    Assert.Equal("((a // b) * c)", shape (singleExpr "a // b * c"))
+    Assert.Equal("(a + (b // c))", shape (singleExpr "a + b // c"))
+
+[<Fact>]
+let ``tilde is bitwise not when unary and xor when binary`` () =
+    Assert.Equal("(~x)", shape (singleExpr "~x"))
+    Assert.Equal("(a ~ (~b))", shape (singleExpr "a ~ ~b"))
+    // Like `-`, `~` can't start a paren-free call argument: `f ~x` is xor.
+    Assert.Equal("(f ~ x)", shape (singleExpr "f ~x"))
+
+[<Fact>]
+let ``a bare bar at the top level of a vector literal is never bitwise or`` () =
+    Assert.Equal("[a | b]", shape (singleExpr "[a | b]"))
+    Assert.Equal("[(a | b), c]", shape (singleExpr "[(a | b), c]"))
+    Assert.Equal("[x | ... | (x & 1)]", shape (singleExpr "[x | x <- xs | x & 1]"))
+    for source in [ "[x, a | b]"; "[x | x <- xs | a | b]"; "[h | t | m]" ] do
+        let _, errors = parseWithErrors source
+        Assert.Contains("isn't bitwise OR", (Assert.Single errors).Message)
+
+[<Fact>]
+let ``parentheses and index brackets give bitwise or its own context again`` () =
+    Assert.Equal("v[(i | 1)]", shape (singleExpr "v[i | 1]"))
+    Assert.Equal("[[(a | b)] | t]", shape (singleExpr "[[(a | b)] | t]"))
+    // Outside any vector literal, `|` is plain bitwise OR.
+    Assert.Equal("(a | b)", shape (singleExpr "a | b"))
