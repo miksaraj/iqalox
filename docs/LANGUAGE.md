@@ -11,7 +11,8 @@
 > **`0.4` is being phased in** (`docs/PLAN-0.4.md`): sections it has
 > already changed are marked **new for `0.4`**, starting with the numeric
 > model (exact integers next to floats, [§2](#2-lexical-structure),
-> [§3](#3-values-and-types), [§5](#5-operators-and-precedence)).
+> [§3](#3-values-and-types), [§5](#5-operators-and-precedence)), then
+> integer division `//` and the bitwise operators (same sections).
 
 This is the complete reference for Iqalox `0.3` — `0.2`'s language plus
 the `0.3` additions (each marked "new for `0.3`") — implemented as a
@@ -360,9 +361,23 @@ comparison or string `+` concatenation (use `concat`,
   - A negative one gives a float, computed exactly and rounded once:
     `2 ^ -1 == 0.5`, and `(2 ^ 2000) ^ -1 == 0.0` rather than an error.
   - Any float operand gives a float.
-- **Integer division `//`** arrives later in `0.4` (`docs/PLAN-0.4.md`
-  Phase 2).
-- **Division by an integer zero** (`1 / 0`, `1 % 0`, `0 ^ -1`) is
+- **Integer division `//`** (new for `0.4`) is floor division on
+  integers only: `7 // 2 == 3`, `-7 // 2 == -4`. It pairs with `%`, so
+  `(a // b) * b + a % b == a`. A float operand is a runtime error,
+  `Operands of '//' must be integers.`; use `floor (a / b)` for floats.
+- **Bitwise operators** (new for `0.4`) work on integers of any size, as
+  infinite two's complement.
+  - `a & b` (and), `a | b` (or), `a ~ b` (xor) and `~a` (not): `~5 == -6`,
+    `-1 & 0xFF == 255`.
+  - `a << n` and `a >> n`, an arithmetic (floored) shift: `-8 >> 1 == -4`.
+  - A float operand is a runtime error, and so is a negative shift count.
+    `<<` is subject to the integer size limit.
+  - **Precedence:** they bind tighter than the comparisons, so
+    `x & 1 == 0` means `(x & 1) == 0` ([§5](#5-operators-and-precedence)).
+  - **Inside a vector literal** a bare `|` is cons/comprehension syntax,
+    never bitwise OR. Parenthesise it there, `[(a | b), c]`; the parse
+    error for `[x, a | b]` says so.
+- **Division by an integer zero** (`1 / 0`, `1 // 0`, `1 % 0`, `0 ^ -1`) is
   currently a runtime error, `Division by zero.`, and so is division by
   a float zero. A later `0.4` phase makes the integer case a
   compile-time check and lets a float zero divisor give `inf`/`nan`
@@ -451,10 +466,14 @@ root `README.md` for the same chain presented tightest-first):
 | `and` | logical and | short-circuits |
 | `==` `!=` | equality | never raises |
 | `>` `>=` `<` `<=` | comparison | numbers only; exact across ints and floats |
+| `\|` | bitwise or (new for `0.4`) | integers only; never a bare `\|` inside `[...]` |
+| `~` | bitwise xor (new for `0.4`) | integers only |
+| `&` | bitwise and (new for `0.4`) | integers only |
+| `<<` `>>` | shift (new for `0.4`) | integers only; `>>` is arithmetic |
 | `-` `+` | additive | numbers only, no string concat |
-| `/` `*` `%` `^` | multiplicative | includes modulo and power, numbers only; `/` always gives a float |
+| `/` `//` `*` `%` `^` | multiplicative | includes modulo and power, numbers only; `/` always gives a float, `//` is integer floor division |
 | `++` `--` | prefix increment/decrement | mutating, target must be a variable |
-| `!` `-` | unary not / negate | |
+| `!` `-` `~` | unary not / negate / bitwise not | `~` new for `0.4`, integers only |
 
 ```
 print (1 + 2 * 3)      # 7
@@ -462,6 +481,8 @@ print (2 ^ 10)         # 1024
 print (7 % 3)          # 1
 print (nil ?? "fallback")   # fallback
 print (!false)         # true
+print (7 // 2)         # 3 (new for 0.4)
+print (5 & 1 == 1)     # true: bitwise binds tighter than ==
 
 var x mut = 1
 print (++x)            # 2 -- mutates x and evaluates to the new value

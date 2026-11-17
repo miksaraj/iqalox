@@ -229,6 +229,16 @@ type Instruction =
     /// erroring -- see `vm/src/vm.cpp`'s handler for the exact resolution
     /// rules.
     | GetSlice
+    /// `docs/PLAN-0.4.md` Phase 2. `IntDivide` is `//` (floored, integers
+    /// only); the bitwise ones work on integers of any size as infinite
+    /// two's complement. `BitNot` is unary `~`; the rest pop two operands.
+    | IntDivide
+    | BitAnd
+    | BitOr
+    | BitXor
+    | BitNot
+    | ShiftLeft
+    | ShiftRight
 
 type Constant =
     /// An exact integer of any size; `write` picks the 64-bit or the big
@@ -315,6 +325,13 @@ let private opcodeOf =
     | PropertyPubMut _ -> 0x35uy
     | Mixin -> 0x36uy
     | GetSlice -> 0x37uy
+    | IntDivide -> 0x38uy
+    | BitAnd -> 0x39uy
+    | BitOr -> 0x3Auy
+    | BitXor -> 0x3Buy
+    | BitNot -> 0x3Cuy
+    | ShiftLeft -> 0x3Duy
+    | ShiftRight -> 0x3Euy
 
 /// Serialized byte length of one instruction -- see the module doc
 /// comment's "Instruction encoding" table.
@@ -331,6 +348,13 @@ let instructionByteLength (instruction: Instruction) : int =
     | Divide
     | Modulo
     | Power
+    | IntDivide
+    | BitAnd
+    | BitOr
+    | BitXor
+    | BitNot
+    | ShiftLeft
+    | ShiftRight
     | Negate
     | Not
     | Equal
@@ -421,6 +445,13 @@ let rec private writeChunk (writer: BinaryWriter) (chunk: Chunk) : unit =
         | Divide
         | Modulo
         | Power
+        | IntDivide
+        | BitAnd
+        | BitOr
+        | BitXor
+        | BitNot
+        | ShiftLeft
+        | ShiftRight
         | Negate
         | Not
         | Equal

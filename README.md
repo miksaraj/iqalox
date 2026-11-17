@@ -77,10 +77,14 @@ references. You'll find the **syntax grammar** in `langspec/`; the
 
 |       Name       |       Operators       | Associates |
 |:----------------:|:---------------------:|:----------:|
-|      Unary       |        `!` `-`        |   Right    |
+|      Unary       |      `!` `-` `~`      |   Right    |
 |    Increment     |       `++` `--`       |   Right    |
-|  Multiplication  |    `/` `*` `%` `^`    |    Left    |
+|  Multiplication  | `/` `//` `*` `%` `^`  |    Left    |
 |     Addition     |        `-` `+`        |    Left    |
+|      Shift       |       `<<` `>>`       |    Left    |
+|   Bitwise AND    |          `&`          |    Left    |
+|   Bitwise XOR    |          `~`          |    Left    |
+|    Bitwise OR    |         `\|`          |    Left    |
 |    Comparison    |  `>` `>=` `<` `<=`    |    Left    |
 |     Equality     |       `==` `!=`       |    Left    |
 |   Logical AND    |         `and`         |    Left    |
@@ -93,7 +97,11 @@ references. You'll find the **syntax grammar** in `langspec/`; the
 
 Listed tightest-binding (evaluated first) to loosest. `%`/`^` share
 `*`/`/`'s precedence level rather than binding tighter, unlike some other
-languages. `?:` is the elvis short form of the ternary (`a ?: b` ≡
+languages. The bitwise operators (new in `0.4`) bind tighter than the
+comparisons, so `x & 1 == 0` is `(x & 1) == 0`. `~` is xor between two
+operands and bitwise not before one. Inside a vector literal, a bare `|`
+is cons/comprehension syntax, never bitwise OR; parenthesise it there:
+`[(a | b)]`. `?:` is the elvis short form of the ternary (`a ?: b` ≡
 `a ? a : b`) at the same precedence as the full `? :` form.
 
 This table covers infix/prefix *operators* specifically — it has never

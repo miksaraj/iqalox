@@ -19,6 +19,15 @@ type TokenType =
     | Comma
     | Semicolon
     | Slash
+    /// `//`, integer floor division (`docs/PLAN-0.4.md` decision 4).
+    | SlashSlash
+    /// Bitwise operators (`docs/PLAN-0.4.md` decision 10): `&`; `~`, which is
+    /// xor when binary and bitwise not when unary; `<<` and `>>`. Bitwise OR
+    /// reuses `VerticalBar`.
+    | Ampersand
+    | Tilde
+    | LessLess
+    | GreaterGreater
     | Backslash
     | Star
     | Underscore

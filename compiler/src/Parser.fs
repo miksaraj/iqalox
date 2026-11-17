@@ -85,6 +85,22 @@ type private ParserState(tokens: Token[]) =
     let errors = ResizeArray<ParseError>()
     let mutable current = 0
     let mutable commaAsOperator = true
+    // `docs/PLAN-0.4.md` decision 10 and Phase 2: `|` is bitwise OR, except
+    // that no unparenthesised `|` at the top level of a vector literal is
+    // OR there -- it keeps its cons/comprehension meaning (`[x | xs]`,
+    // `[e | x <- xs | guard]`). False inside `[...]`; parentheses and
+    // index/slice brackets are self-delimiting and turn it back on.
+    let mutable barAsOperator = true
+
+    /// Runs `parse` with `barAsOperator` set to `enabled`, restoring the
+    /// outer context's setting afterward even if `parse` fails.
+    let withBarAsOperator (enabled: bool) (parse: unit -> 'T) : 'T =
+        let previous = barAsOperator
+        barAsOperator <- enabled
+        try
+            parse ()
+        finally
+            barAsOperator <- previous
 
     let isAtEnd () = tokens.[current].Type = Eof
     let peek () = tokens.[current]
@@ -186,6 +202,14 @@ type private ParserState(tokens: Token[]) =
 
     let consume (tokenType: TokenType) (message: string) : Token =
         if check tokenType then advance () else error (peek ()) message
+
+    /// Consumes a vector literal's closing `]`. A stray `|` there is almost
+    /// always a bitwise OR written without parentheses, so say so.
+    let consumeVectorClose (message: string) =
+        if check VerticalBar then
+            error (peek ()) "A bare '|' inside [...] isn't bitwise OR (it marks cons or a comprehension); write (a | b)."
+        else
+            consume RightBracket message
 
     member this.Parse() : Stmt list * ParseError list =
         let statements = ResizeArray<Stmt>()
@@ -539,8 +563,43 @@ type private ParserState(tokens: Token[]) =
         expr
 
     member this.Comparison() : Expr =
-        let mutable expr = this.Addition()
+        let mutable expr = this.BitOr()
         while matchAny [ Greater; GreaterEqual; Less; LessEqual ] do
+            let operator = previous ()
+            let right = this.BitOr()
+            expr <- Binary(expr, operator, right)
+        expr
+
+    // Bitwise operators (`docs/PLAN-0.4.md` decision 10) sit between the
+    // comparisons and `+`/`-`, Python-style, so `x & 1 == 0` means
+    // `(x & 1) == 0`. Tightest to loosest: shifts, `&`, `~` (xor), `|`.
+    member this.BitOr() : Expr =
+        let mutable expr = this.BitXor()
+        while barAsOperator && matchAny [ VerticalBar ] do
+            let operator = previous ()
+            let right = this.BitXor()
+            expr <- Binary(expr, operator, right)
+        expr
+
+    member this.BitXor() : Expr =
+        let mutable expr = this.BitAnd()
+        while matchAny [ Tilde ] do
+            let operator = previous ()
+            let right = this.BitAnd()
+            expr <- Binary(expr, operator, right)
+        expr
+
+    member this.BitAnd() : Expr =
+        let mutable expr = this.Shift()
+        while matchAny [ Ampersand ] do
+            let operator = previous ()
+            let right = this.Shift()
+            expr <- Binary(expr, operator, right)
+        expr
+
+    member this.Shift() : Expr =
+        let mutable expr = this.Addition()
+        while matchAny [ LessLess; GreaterGreater ] do
             let operator = previous ()
             let right = this.Addition()
             expr <- Binary(expr, operator, right)
@@ -556,7 +615,7 @@ type private ParserState(tokens: Token[]) =
 
     member this.Multiplication() : Expr =
         let mutable expr = this.Increment()
-        while matchAny [ Slash; Star; Percent; Power ] do
+        while matchAny [ Slash; SlashSlash; Star; Percent; Power ] do
             let operator = previous ()
             let right = this.Increment()
             expr <- Binary(expr, operator, right)
@@ -574,7 +633,7 @@ type private ParserState(tokens: Token[]) =
             this.Unary()
 
     member this.Unary() : Expr =
-        if matchAny [ Bang; Minus ] then
+        if matchAny [ Bang; Minus; Tilde ] then
             let operator = previous ()
             let right = this.Unary()
             Unary(operator, right)
@@ -592,13 +651,13 @@ type private ParserState(tokens: Token[]) =
                 let isSlice = isSliceAhead ()
                 let bracket = advance ()
                 if isSlice then
-                    let start = if check Colon then None else Some(this.Expression())
+                    let start = if check Colon then None else Some(withBarAsOperator true this.Expression)
                     consume Colon "Expect ':' in slice." |> ignore
-                    let stop = if check RightBracket then None else Some(this.Expression())
+                    let stop = if check RightBracket then None else Some(withBarAsOperator true this.Expression)
                     consume RightBracket "Expect ']' after slice." |> ignore
                     expr <- Slice(expr, start, stop, bracket)
                 else
-                    let index = this.Expression()
+                    let index = withBarAsOperator true this.Expression
                     consume RightBracket "Expect ']' after index." |> ignore
                     expr <- Index(expr, index, bracket)
             else
@@ -722,7 +781,7 @@ type private ParserState(tokens: Token[]) =
             commaAsOperator <- true
             let expr =
                 try
-                    this.Expression()
+                    withBarAsOperator true this.Expression
                 finally
                     commaAsOperator <- previousCommaAsOperator
             consume RightParen "Expect ')' after expression." |> ignore
@@ -730,7 +789,9 @@ type private ParserState(tokens: Token[]) =
         elif matchAny [ LeftBracket ] then
             let bracket = previous ()
             let previousCommaAsOperator = commaAsOperator
+            let previousBarAsOperator = barAsOperator
             commaAsOperator <- false
+            barAsOperator <- false
             try
                 if check RightBracket then
                     advance () |> ignore
@@ -772,18 +833,18 @@ type private ParserState(tokens: Token[]) =
                             while matchAny [ Comma ] do
                                 generators.Add(parseGenerator ())
                             let guard = if matchAny [ VerticalBar ] then Some(this.Expression()) else None
-                            consume RightBracket "Expect ']' after list comprehension." |> ignore
+                            consumeVectorClose "Expect ']' after list comprehension." |> ignore
                             ListComprehension(first, List.ofSeq generators, guard, bracket)
                         else
                             let list = this.Expression()
-                            consume RightBracket "Expect ']' after cons." |> ignore
+                            consumeVectorClose "Expect ']' after cons." |> ignore
                             Cons(first, list, bracket)
                     else
                         let values = ResizeArray<Expr>()
                         values.Add(first)
                         while matchAny [ Comma ] do
                             values.Add(parseVectorElement ())
-                        consume RightBracket "Expect ']' after vector elements." |> ignore
+                        consumeVectorClose "Expect ']' after vector elements." |> ignore
                         Vector(List.ofSeq values)
             finally
                 // Bug fix vs. poc: poc restores comma_as_operator with a
@@ -793,6 +854,7 @@ type private ParserState(tokens: Token[]) =
                 // for the rest of the file. Guaranteed here regardless of
                 // whether parsing the elements succeeded.
                 commaAsOperator <- previousCommaAsOperator
+                barAsOperator <- previousBarAsOperator
         else
             error (peek ()) "Expect expression."
 

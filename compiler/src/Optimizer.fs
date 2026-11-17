@@ -138,6 +138,25 @@ let private foldBinary (op: Token) (l: LiteralValue) (r: LiteralValue) : Literal
         match toExactDouble a, toExactDouble b with
         | Some x, Some y -> numberResult (x / y)
         | _ -> None
+    // `//` and the bitwise operators (Phase 2): integers only. A zero
+    // divisor, a negative shift count, a float operand, or a result past
+    // the size limit stays for the VM to report.
+    | SlashSlash, IntValue a, IntValue b when not b.IsZero ->
+        let quotient = bigint.Divide(a, b)
+        // BigInteger division truncates; `//` floors.
+        let floored = if not (a % b).IsZero && (a.Sign < 0) <> (b.Sign < 0) then quotient - 1I else quotient
+        intResult floored
+    | Ampersand, IntValue a, IntValue b -> Some(IntValue(a &&& b))
+    | VerticalBar, IntValue a, IntValue b -> Some(IntValue(a ||| b))
+    | Tilde, IntValue a, IntValue b -> Some(IntValue(a ^^^ b))
+    | LessLess, IntValue a, IntValue b when b.Sign >= 0 ->
+        if a.IsZero then Some(IntValue 0I)
+        elif b > bigint Scanner.maxIntegerBits then None
+        else intResult (a <<< int b)
+    | GreaterGreater, IntValue a, IntValue b when b.Sign >= 0 ->
+        // Arithmetic (floored) shift, like infinite two's complement.
+        if b >= bigint (a.GetBitLength()) then Some(IntValue(if a.Sign < 0 then -1I else 0I))
+        else Some(IntValue(a >>> int b))
     | (Greater | GreaterEqual | Less | LessEqual), IntValue a, IntValue b ->
         let c = compare a b
         Some(
@@ -182,6 +201,7 @@ let private simplify (constants: Dictionary<string, LiteralValue>) (e: BoundExpr
     | BGrouping(BLiteral v) -> BLiteral v
     | BUnary(op, BLiteral(FloatValue n)) when op.Type = Minus -> BLiteral(FloatValue(-n))
     | BUnary(op, BLiteral(IntValue n)) when op.Type = Minus -> BLiteral(IntValue(-n))
+    | BUnary(op, BLiteral(IntValue n)) when op.Type = Tilde -> BLiteral(IntValue(-n - 1I))
     | BUnary(op, BLiteral v) when op.Type = Bang ->
         match literalTruthiness v with
         | Some t -> BLiteral(BoolValue(not t))

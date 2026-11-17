@@ -1,0 +1,52 @@
+<#
+    Integer division and bitwise operators (0.4, docs/PLAN-0.4.md decisions
+    4 and 10, Phase 2).
+
+    `//` is floor division and takes integers only. The bitwise operators
+    are `&`, `|`, `~` (xor when binary, not when unary), `<<` and `>>`.
+    They work on integers of any size as infinite two's complement, and
+    they bind tighter than comparisons, so `x & 1 == 0` means
+    `(x & 1) == 0`.
+
+    Inside a vector literal a bare `|` keeps its cons/comprehension meaning,
+    so a bitwise OR there needs parentheses: `[(a | b)]`.
+#>
+
+# Floor division pairs with `%`: (a // b) * b + a % b == a.
+print (7 // 2)
+print (-7 // 2)
+print (-7 // 2 * 2 + -7 % 2)
+
+# Bitwise and, or, xor, not.
+print (12 & 10)
+print (12 | 10)
+print (12 ~ 10)
+print (~5)
+
+# Negative numbers behave as infinite two's complement.
+print (-1 & 0xFF)
+print (-8 >> 1)
+
+# Shifts are exact at any size.
+print (1 << 100)
+print ((1 << 100) >> 98)
+
+# Precedence: bitwise binds tighter than comparison.
+fun isOdd(n) {
+    return n & 1 == 1
+}
+print (isOdd 7)
+print (isOdd 10)
+
+# Flags in a bit set.
+var read = 0b001
+var write = 0b010
+var exec = 0b100
+var mode = read | write
+print (mode & write != 0)
+print (mode & exec != 0)
+
+# Inside [...], parenthesise a bitwise OR; a bare `|` is cons/comprehension.
+var bits = [1, 2, 4]
+print [(b | 8) | b <- bits]
+print [b | b <- bits | b & 0b110 != 0]

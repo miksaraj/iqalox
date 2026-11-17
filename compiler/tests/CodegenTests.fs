@@ -677,3 +677,15 @@ let ``a vector literal that's entirely one spread skips BuildVector 1 for the (n
         [| BuildVector 0; GetGlobal 0; VectorExtend; Pop; Nil; Return |],
         chunk.Code
     )
+
+[<Fact>]
+let ``integer division and bitwise operators compile to their own opcodes`` () =
+    let opcodes (source: string) =
+        (compileSource $"var a mut = 1\nvar b mut = 2\nvar r mut = {source}").Code
+    Assert.Contains(IntDivide, opcodes "a // b")
+    Assert.Contains(BitAnd, opcodes "a & b")
+    Assert.Contains(BitOr, opcodes "a | b")
+    Assert.Contains(BitXor, opcodes "a ~ b")
+    Assert.Contains(BitNot, opcodes "~a")
+    Assert.Contains(ShiftLeft, opcodes "a << b")
+    Assert.Contains(ShiftRight, opcodes "a >> b")

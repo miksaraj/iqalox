@@ -177,6 +177,21 @@ own top-level grammar grew from `0.1`'s.
   floats: the same kind of whitespace rule `0.2` introduced for `v[i]`
   versus `f [i]`. `...` is unaffected, since its second `.` isn't a
   digit.
+* **Integer division `//` and bitwise operators** (`docs/PLAN-0.4.md`
+  decisions 4 and 10, Phase 2).
+  - `//` joins `multiplication` (the same level as `*`, `/`, `%` and
+    `^`).
+  - Four new levels sit between `comparison` and `addition`, Python-style,
+    so `x & 1 == 0` is `(x & 1) == 0`. From tightest: `shift`, `bitAnd`,
+    `bitXor` and `bitOr`.
+  - `~` is xor as a binary operator and bitwise not as a prefix one
+    (`unary`). Like `-`, it can't start a paren-free call argument, so
+    `f ~x` is xor; a call needs `f (~x)`.
+* **A bare `|` is never bitwise OR at the top level of a vector literal**
+  (Phase 2). That covers any element, generator source, guard or cons
+  tail, where `|` keeps marking cons and comprehensions. Parentheses give
+  `bitOr` back (`[(a | b), c]`), and so do index and slice brackets
+  (`v[i | 1]`). `[x, a | b]` is a parse error that says so.
 
 ##
     program         → declaration* EOF ;
@@ -233,12 +248,16 @@ own top-level grammar grew from `0.1`'s.
     logic_or        → logic_and ( "or" logic_and )* ;
     logic_and       → equality ( "and" equality )* ;
     equality        → comparison ( ( "!=" | "==" ) comparison )* ;
-    comparison      → addition ( ( ">" | ">=" | "<" | "<=" ) addition )* ;
+    comparison      → bitOr ( ( ">" | ">=" | "<" | "<=" ) bitOr )* ;
+    bitOr           → bitXor ( "|" bitXor )* ;
+    bitXor          → bitAnd ( "~" bitAnd )* ;
+    bitAnd          → shift ( "&" shift )* ;
+    shift           → addition ( ( "<<" | ">>" ) addition )* ;
     addition        → multiplication ( ( "-" | "+" ) multiplication )* ;
-    multiplication  → increment ( ( "/" | "*" | "%" | "^" ) increment )* ;
+    multiplication  → increment ( ( "/" | "//" | "*" | "%" | "^" ) increment )* ;
     increment       → ( "++" | "--" ) unary | unary ;
 
-    unary           → ( "!" | "-" ) unary | call ;
+    unary           → ( "!" | "-" | "~" ) unary | call ;
     call            → call_head ( "." IDENTIFIER arguments?
                                  | "[" expression "]"
                                  | "[" expression? ":" expression? "]" )* ;

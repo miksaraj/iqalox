@@ -8,11 +8,11 @@ var secondsPerDay = secondsPerHour * hoursPerDay
 var checksum mut = 0
 for (var t mut = 0; t < 400000; ++t) {
     var seconds = t * 7
-    var days = (seconds - seconds % secondsPerDay) / secondsPerDay
+    var days = seconds // secondsPerDay
     var rest = seconds % secondsPerDay
-    var hours = (rest - rest % secondsPerHour) / secondsPerHour
+    var hours = rest // secondsPerHour
     var leftover = rest % secondsPerHour
-    var minutes = (leftover - leftover % secondsPerMinute) / secondsPerMinute
+    var minutes = leftover // secondsPerMinute
     checksum = checksum + days + hours * 3 + minutes * 5 + leftover % secondsPerMinute
 }
 print checksum

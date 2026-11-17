@@ -189,6 +189,13 @@ void Vm::numericSlowPath(bytecode::OpCode op, const Value& a, const Value& b) {
             case OpCode::Modulo: result = numeric::modulo(*this, a, b); break;
             case OpCode::Power: result = numeric::power(*this, a, b); break;
             case OpCode::Negate: result = numeric::negate(*this, a); break;
+            case OpCode::IntDivide: result = numeric::intDivide(*this, a, b); break;
+            case OpCode::BitAnd: result = numeric::bitAnd(*this, a, b); break;
+            case OpCode::BitOr: result = numeric::bitOr(*this, a, b); break;
+            case OpCode::BitXor: result = numeric::bitXor(*this, a, b); break;
+            case OpCode::BitNot: result = numeric::bitNot(*this, a); break;
+            case OpCode::ShiftLeft: result = numeric::shiftLeft(*this, a, b); break;
+            case OpCode::ShiftRight: result = numeric::shiftRight(*this, a, b); break;
             case OpCode::Greater: result = boolValue(numeric::compare(a, b) > 0); break;
             case OpCode::GreaterEqual: result = boolValue(numeric::compare(a, b) >= 0); break;
             case OpCode::Less: result = boolValue(numeric::compare(a, b) < 0); break;
@@ -536,6 +543,80 @@ void Vm::run() {
             case OpCode::Negate: {
                 Value a = pop();
                 numericSlowPath(OpCode::Negate, a, a);
+                break;
+            }
+            // docs/PLAN-0.4.md Phase 2. Inline fast paths for two int64s
+            // where the result can't overflow; everything else (big
+            // integers, errors) goes through numericSlowPath.
+            case OpCode::IntDivide: {
+                Value b = pop(), a = pop();
+                if (isSmallInt(a) && isSmallInt(b) && asSmallInt(b) > 0) {
+                    int64_t x = asSmallInt(a), y = asSmallInt(b);
+                    int64_t q = x / y;
+                    push(smallIntValue((x % y != 0 && x < 0) ? q - 1 : q));  // floor, y > 0
+                } else {
+                    numericSlowPath(OpCode::IntDivide, a, b);
+                }
+                break;
+            }
+            case OpCode::BitAnd: {
+                Value b = pop(), a = pop();
+                if (isSmallInt(a) && isSmallInt(b)) {
+                    push(smallIntValue(asSmallInt(a) & asSmallInt(b)));
+                } else {
+                    numericSlowPath(OpCode::BitAnd, a, b);
+                }
+                break;
+            }
+            case OpCode::BitOr: {
+                Value b = pop(), a = pop();
+                if (isSmallInt(a) && isSmallInt(b)) {
+                    push(smallIntValue(asSmallInt(a) | asSmallInt(b)));
+                } else {
+                    numericSlowPath(OpCode::BitOr, a, b);
+                }
+                break;
+            }
+            case OpCode::BitXor: {
+                Value b = pop(), a = pop();
+                if (isSmallInt(a) && isSmallInt(b)) {
+                    push(smallIntValue(asSmallInt(a) ^ asSmallInt(b)));
+                } else {
+                    numericSlowPath(OpCode::BitXor, a, b);
+                }
+                break;
+            }
+            case OpCode::BitNot: {
+                Value a = pop();
+                if (isSmallInt(a)) {
+                    push(smallIntValue(~asSmallInt(a)));
+                } else {
+                    numericSlowPath(OpCode::BitNot, a, a);
+                }
+                break;
+            }
+            case OpCode::ShiftLeft: {
+                Value b = pop(), a = pop();
+                // Safe when |a| < 2^(62 - b): the result stays below 2^62.
+                if (isSmallInt(a) && isSmallInt(b) && asSmallInt(b) >= 0 && asSmallInt(b) < 62) {
+                    int64_t x = asSmallInt(a), limit = int64_t{1} << (62 - asSmallInt(b));
+                    if (x > -limit && x < limit) {
+                        push(smallIntValue(x * (int64_t{1} << asSmallInt(b))));
+                        break;
+                    }
+                }
+                numericSlowPath(OpCode::ShiftLeft, a, b);
+                break;
+            }
+            case OpCode::ShiftRight: {
+                Value b = pop(), a = pop();
+                if (isSmallInt(a) && isSmallInt(b) && asSmallInt(b) >= 0) {
+                    // C++20 `>>` on a negative signed value is arithmetic.
+                    int64_t x = asSmallInt(a), n = asSmallInt(b);
+                    push(smallIntValue(n >= 63 ? (x < 0 ? -1 : 0) : x >> n));
+                } else {
+                    numericSlowPath(OpCode::ShiftRight, a, b);
+                }
                 break;
             }
             case OpCode::Not:

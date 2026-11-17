@@ -44,7 +44,8 @@ python3 - "$TMP/fuzz" <<'PY'
 import random, sys, os
 random.seed(20260101)
 out = sys.argv[1]; os.makedirs(out)
-ops = ['+','-','*','/','%','^','<','<=','>','>=','==','!=','and','or','??']
+ops = ['+','-','*','/','%','^','<','<=','>','>=','==','!=','and','or','??',
+       '//','&','|','~','<<','>>']
 # Integers and floats side by side (docs/PLAN-0.4.md Phase 1), including an
 # int just past 2^53 and one past 64 bits, where folding must defer to the VM.
 atoms = ['0','1','2','3','7','0.5','100','true','false','nil','"a"','"b"',
@@ -54,6 +55,7 @@ def expr(d):
     r = random.random()
     if r < 0.1: return '(!' + expr(d-1) + ')'
     if r < 0.15: return '(-' + expr(d-1) + ')'
+    if r < 0.18: return '(~' + expr(d-1) + ')'
     if r < 0.2: return '((' + expr(d-1) + ') ? (' + expr(d-1) + ') : (' + expr(d-1) + '))'
     return '(' + expr(d-1) + ' ' + random.choice(ops) + ' ' + expr(d-1) + ')'
 for i in range(60):

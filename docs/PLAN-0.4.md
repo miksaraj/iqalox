@@ -117,10 +117,16 @@ Two answers changed the plan's shape and needed their own follow-up rounds:
     - The operators are `a & b`, `a | b`, `a ~ b` (xor), `~a` (bitwise not),
       `a << n` and `a >> n`. `^` stays power; `~` is xor when binary and
       bitwise not when unary.
-    - **`|` inside a vector literal**: a top-level `|` in a vector literal's
-      head keeps its `0.2` meaning (cons/comprehension), so a bitwise OR
-      there needs parentheses: `[(a | b), c]`. Everywhere else `|` is
-      bitwise OR.
+    - **`|` inside a vector literal**: no bare `|` at the top level of a
+      vector literal is bitwise OR. That covers any element, generator
+      source, guard or cons tail, where `|` keeps its `0.2`
+      cons/comprehension meaning; a bitwise OR there needs parentheses:
+      `[(a | b), c]`. Parentheses and index/slice brackets (`v[i | 1]`)
+      are their own context. Everywhere else `|` is bitwise OR. *Clarified
+      at Phase 2 start:* this draft originally said "a vector literal's
+      head", which disagreed with the wording the owner had approved
+      ("inside a vector literal"); asked again, the owner chose the
+      whole-top-level rule over a position-dependent one.
     - **Precedence is Python-like**. From tightest to loosest: unary
       (`! - ~`), multiplicative (`* / // % ^`), additive (`+ -`), shifts
       (`<< >>`), `&`, `~` (xor), `|`, then comparisons. So `x & 1 == 0` means
@@ -509,8 +515,8 @@ land it, verified by new tests (§6).
 | Integer type: literals, exact arbitrary precision, `/`, `^`, mixed promotion, `==`, printing | §1.1-9, §1.30-34 | Done |
 | Hex/binary/octal, separators, exponent literals | §1.2 | Done |
 | Integer-only indices and slice bounds; `length` returns int | §1.9 | Done |
-| `//` integer division | §1.4 | Not started |
-| Bitwise operators `& \| ~ << >>` | §1.10 | Not started |
+| `//` integer division | §1.4 | Done |
+| Bitwise operators `& \| ~ << >>` | §1.10 | Done |
 | Compile-time division-by-zero check (incl. `0 ^ -1`); IEEE float zero | §1.12, §1.35 | Not started |
 | Code-point strings: indexing, negative, slices, immutability | §1.13-14 | Not started |
 | String iteration (generators, spread) and ordering | §1.15-16 | Not started |
@@ -739,11 +745,82 @@ mini-gmp has only quadratic multiplication.
   same API, so swapping it in would be a contained change if `1.2`'s
   measurements call for it.
 
-**Phase 2 — `//` and bitwise operators.** Decisions 4 and 10: new
-tokens, the four precedence levels, unary `~`, the vector-head `|` rule,
-the opcodes, and two's-complement semantics over bigints. Also return
-`bench/realistic/collatz.iqx` to integers with `//`, and move
-`timeconv.iqx` to `//` (see Phase 1).
+**Phase 2 — `//` and bitwise operators — done.** Decisions 4 and 10.
+One question came up at the start: the plan's "vector literal's head"
+wording for `|` disagreed with what the owner had approved, and the owner
+chose the whole-top-level rule (decision 10, now reworded).
+
+*Compiler.*
+- **Tokens.** New tokens `//`, `&`, `~`, `<<`, `>>`; `|` reuses
+  `VerticalBar`. Longest match keeps `|>`, `<-`, `<=` and `/` intact.
+- **Precedence.** Four parser levels sit between `Comparison` and
+  `Addition` (`BitOr` → `BitXor` → `BitAnd` → `Shift`). `//` joins
+  `Multiplication`, and `~` joins `Unary`.
+- **`~` and calls.** Like `-`, `~` can't start a paren-free call
+  argument, so `f ~x` is xor; that follows the existing documented rule
+  rather than being a new decision.
+- **The `|` rule** uses a `barAsOperator` flag, mirroring the existing
+  `commaAsOperator`. It is off at the top level of `[...]` and back on
+  inside parentheses and index/slice brackets. A stray `|` where a vector
+  literal expects `]` gets a targeted error: "A bare '|' inside [...]
+  isn't bitwise OR (it marks cons or a comprehension); write (a | b)."
+- **Opcodes.** Seven new ones, `IntDivide`, `BitAnd`, `BitOr`, `BitXor`,
+  `BitNot`, `ShiftLeft` and `ShiftRight` (`0x38`-`0x3E`). They're purely
+  additive, so the format stays v4, as when `0.2` added opcodes.
+- **Folding.** Constant folding handles all seven on integer literals.
+  .NET's `BigInteger` already uses infinite two's complement for
+  `&`/`|`/xor/`>>`, and `//` floors explicitly. A zero divisor, a float
+  operand, a negative shift count or a result past the size limit is left
+  for the VM to report.
+
+*VM.*
+- **Semantics.** `numeric.cpp` gains `intDivide`, `bitAnd`/`bitOr`/
+  `bitXor`/`bitNot` and `shiftLeft`/`shiftRight`, over mini-gmp for big
+  integers (`mpz_fdiv_q`, `mpz_and`/`ior`/`xor`/`com`, `mpz_mul_2exp`,
+  `mpz_fdiv_q_2exp`).
+- **Fast paths.** `run()` gets inline int64 fast paths for every case that
+  can't overflow: a positive `//` divisor, all of `&`/`|`/xor/`~`, a
+  `<<` whose result stays below 2^62, and `>>`.
+- **Slow path.** Everything else goes through `numericSlowPath`, keeping
+  `try` out of the dispatch loop (the Phase 1 lesson). `INT64_MIN // -1`
+  becomes a big integer.
+- **Errors.** `Operands of '//' must be integers.` (and the same per
+  bitwise operator), `Negative shift count.`, and `Integer result too
+  large.` for a `<<` past 2^26 bits.
+
+*Benchmarks.*
+- `bench/realistic/collatz.iqx` is back on integers with `//`, and
+  `timeconv.iqx`'s three hand-rolled `(a - a % b) / b` divisions are now
+  `a // b`. Both print exactly what they printed before `0.4` (checked on
+  the pre-Phase-1 toolchain).
+- Measured against `main` (Phase 1), interleaved and pinned, 9 runs each:
+
+  | Benchmarks | Change vs `main` |
+  |---|---|
+  | `collatz` | -14% |
+  | `timeconv` | -34% |
+  | everything else | within ±6% (noise) |
+
+*Verification.*
+- **Tests.**
+  - xUnit: 367, up from 356. New cases cover the tokens, precedence
+    (`x & 1 == 0`, the full level order, left-associative `//`), unary
+    vs binary `~` including `f ~x`, the `|` rule in every position
+    including the parse errors, codegen opcodes, and folding plus what
+    must stay unfolded.
+  - Catch2: 140, up from 136. They cover floored `//` (including the
+    `(a // b) * b + a % b == a` identity and `INT64_MIN // -1`), two's
+    complement on negative and big integers with results shrinking back
+    to int64, shift edges (floored `>>`, huge counts, negative counts, the
+    size limit), and every opcode on both the fast and slow paths.
+- **Sanitizers.** Clean under ASan/UBSan.
+- **Optimizer differential.** `scripts/optimizer-differential.sh` now
+  fuzzes `//`, `&`, `|`, `~` (binary and unary), `<<` and `>>` too, and
+  passes on 246 programs.
+- **Examples.** A new `langspec/examples/bitwise.iqx`, and
+  `numbers.iqx` gains `//`.
+- **Docs.** `docs/LANGUAGE.md` §3 and §5, `langspec/SYNTAX_GRAMMAR.md`
+  (productions and notes) and the README's precedence table are updated.
 
 **Phase 3 — Compile-time division-by-zero check.** Decisions 12 and 35:
 - the narrowing pass, covering `^` as well as `/`, `//` and `%`;

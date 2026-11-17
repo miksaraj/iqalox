@@ -418,7 +418,7 @@ own `sort`/`push` can never clobber a native in the VM's flat global table.
 
 ## Architecture (`compiler/` + `vm/`, 0.4)
 
-**In progress: Phases 0 (dependency plumbing) and 1 (the integer type) have landed.** See `docs/PLAN-0.4.md`. Its §1 records 29
+**In progress: Phases 0 (dependency plumbing), 1 (the integer type) and 2 (`//` and bitwise operators) have landed.** See `docs/PLAN-0.4.md`. Its §1 records 29
 design decisions the repository owner settled before any code. **Treat them as
 decided; don't re-open them.** The handful still pending are listed in §2 and
 are to be asked when their phase starts. In outline:
@@ -473,6 +473,17 @@ Phase 1 added the integer type:
 - **Keep `try` out of `Vm::run()`.** Arithmetic's slow paths go through
   the out-of-line `Vm::numericSlowPath`. An inline `try` in the dispatch
   loop once cost 30-60% on every benchmark (`docs/PLAN-0.4.md` Phase 1).
+
+Phase 2 added `//` and the bitwise operators:
+- **Opcodes.** `IntDivide`, `BitAnd`, `BitOr`, `BitXor`, `BitNot`,
+  `ShiftLeft` and `ShiftRight` (bytecode format still v4), with
+  semantics in `numeric.cpp`.
+- **Precedence.** Four parser levels sit between comparison and addition
+  (`BitOr`, `BitXor`, `BitAnd`, `Shift`).
+- **The `|` rule.** `Parser.fs`'s `barAsOperator` flag (like
+  `commaAsOperator`) makes a bare `|` at the top level of a vector
+  literal cons/comprehension syntax, never OR. Parentheses and
+  index/slice brackets turn OR back on.
 
 ## Engineering conventions
 

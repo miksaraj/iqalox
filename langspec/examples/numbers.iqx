@@ -30,6 +30,10 @@ print (7 / 2)
 print (6 / 2)
 print ((2 ^ 2000) / (2 ^ 1999))
 
+# `//` is integer floor division (integers only).
+print (7 // 2)
+print (-7 // 2)
+
 # A negative exponent gives a float too.
 print (2 ^ -1)
 
