@@ -57,3 +57,21 @@ print 0.00001
 var v = [10, 20, 30]
 print (length v)
 print v[length v - 1]
+
+# A divisor must be provably non-zero: a non-zero constant, or an
+# immutable variable checked first. `1 / 0` doesn't compile.
+var width = 10
+print (37 % width)
+fun average(total, count) {
+    return count != 0 ? total / count : 0
+}
+print (average 10, 4)
+print (average 10, 0)
+var xs = [4, 0, 2]
+print [12 // x | x <- xs | x != 0]
+
+# A float zero divisor follows IEEE instead.
+var zero = 0.0
+print (1 / zero)
+print (-1 / zero)
+print (zero / zero)

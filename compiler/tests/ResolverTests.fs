@@ -740,3 +740,128 @@ let ``a never-instantiated top-level class produces no warning -- classes aren't
     let _, errors, warnings = resolveSourceWithWarnings "class Widget {}"
     Assert.Empty errors
     Assert.Empty warnings
+
+// --- docs/PLAN-0.4.md Phase 3: compile-time division-by-zero check ---
+
+let private divisionErrors (source: string) =
+    let _, errors, _ = resolveSourceWithWarnings source
+    errors |> List.map (fun e -> e.Message)
+
+let private acceptsDivision (source: string) = Assert.Empty(divisionErrors source)
+
+let private rejectsDivision (expected: string) (source: string) =
+    let errors = divisionErrors source
+    Assert.Single errors |> ignore
+    Assert.Contains(expected, errors.Head)
+
+let private unproven = "Can't prove this divisor isn't zero"
+
+[<Fact>]
+let ``a non-zero literal divisor is accepted for all three operators`` () =
+    acceptsDivision "print (7 / 2)\nprint (7 // 2)\nprint (7 % 2)\nprint (7 / 0.5)"
+
+[<Fact>]
+let ``a literal zero divisor is an error for all three operators`` () =
+    for op in [ "/"; "//"; "%" ] do
+        rejectsDivision "the divisor is the constant 0" $"print (7 {op} 0)"
+
+[<Fact>]
+let ``a constant expression folding to zero is an error`` () =
+    rejectsDivision "the divisor is the constant 0" "print (7 / (3 - 3))"
+    rejectsDivision "the divisor is the constant 0" "print (7 / (2 & 1 << 3))"
+
+[<Fact>]
+let ``an immutable global constant divisor is propagated, chains included`` () =
+    acceptsDivision "var a = 3\nvar b = a * 2 - 1\nprint (100 // b)"
+    rejectsDivision "the divisor is the constant 0" "var a = 3\nvar b = a - 3\nprint (100 // b)"
+
+[<Fact>]
+let ``an immutable local constant divisor is propagated`` () =
+    acceptsDivision "fun f() {\n    var size = 10\n    return 95 % size\n}\nprint f()"
+    rejectsDivision "the divisor is the constant 0" "fun f() {\n    var size = 0\n    return 95 % size\n}\nprint f()"
+
+[<Fact>]
+let ``a mutable divisor is never accepted, even guarded or constant-initialized`` () =
+    rejectsDivision unproven "var d mut = 3\nprint (10 / d)"
+    rejectsDivision unproven "var d mut = 3\nprint (d != 0 ? 10 / d : 0)"
+
+[<Fact>]
+let ``an unguarded parameter or call result is not accepted`` () =
+    rejectsDivision unproven "fun f(d) {\n    return 10 / d\n}\nprint f(2)"
+    rejectsDivision unproven "fun g() {\n    return 2\n}\nprint (10 / g())"
+
+[<Fact>]
+let ``a != 0 or == 0 guard in a ternary narrows the right branch`` () =
+    acceptsDivision "fun f(d) {\n    return d != 0 ? 10 / d : 0\n}\nprint f(2)"
+    acceptsDivision "fun f(d) {\n    return 0 != d ? 10 / d : 0\n}\nprint f(2)"
+    acceptsDivision "fun f(d) {\n    return d == 0 ? 0 : 10 // d\n}\nprint f(2)"
+    rejectsDivision unproven "fun f(d) {\n    return d == 0 ? 10 / d : 0\n}\nprint f(2)"
+    rejectsDivision unproven "fun f(d) {\n    return d != 0 ? 0 : 10 / d\n}\nprint f(2)"
+
+[<Fact>]
+let ``equality with a non-zero constant narrows, with zero or another value does not`` () =
+    acceptsDivision "fun f(d) {\n    return d == 5 ? 1 / d : 0\n}\nprint f(5)"
+    rejectsDivision unproven "fun f(d) {\n    return d != 1 ? 10 / d : 0\n}\nprint f(2)"
+    rejectsDivision unproven "fun f(d, e) {\n    return e != 0 ? 10 / d : 0\n}\nprint f(2, 3)"
+
+[<Fact>]
+let ``orderings narrow when they exclude zero`` () =
+    acceptsDivision "fun f(d) {\n    return d > 0 ? 1 / d : 0\n}\nprint f(2)"
+    acceptsDivision "fun f(d) {\n    return d < 0 ? 1 / d : 0\n}\nprint f(2)"
+    acceptsDivision "fun f(d) {\n    return d >= 1 ? 1 / d : 0\n}\nprint f(2)"
+    acceptsDivision "fun f(d) {\n    return 0 < d ? 1 / d : 0\n}\nprint f(2)"
+    acceptsDivision "fun f(d) {\n    return d <= 0 ? 0 : 1 / d\n}\nprint f(2)"
+    rejectsDivision unproven "fun f(d) {\n    return d >= 0 ? 1 / d : 0\n}\nprint f(2)"
+    rejectsDivision unproven "fun f(d) {\n    return d > -1 ? 1 / d : 0\n}\nprint f(2)"
+
+[<Fact>]
+let ``and, or and ! combine guards`` () =
+    acceptsDivision "fun f(d) {\n    return d > 0 and 10 % d\n}\nprint f(2)"
+    acceptsDivision "fun f(d) {\n    return d == 0 or 10 % d\n}\nprint f(2)"
+    acceptsDivision "fun f(d) {\n    return !(d == 0) ? 1 / d : 0\n}\nprint f(2)"
+    acceptsDivision "fun f(d, e) {\n    return d != 0 and e != 0 ? 1 / d + 1 / e : 0\n}\nprint f(2, 3)"
+    acceptsDivision "fun f(d) {\n    return d < 0 or d > 0 ? 1 / d : 0\n}\nprint f(2)"
+    rejectsDivision unproven "fun f(d) {\n    return d != 0 or 10 / d\n}\nprint f(2)"
+    rejectsDivision unproven "fun f(d, e) {\n    return d != 0 or e != 0 ? 1 / d : 0\n}\nprint f(2, 3)"
+
+[<Fact>]
+let ``a guard narrows into a lambda and a comprehension's own guard narrows its element`` () =
+    acceptsDivision "fun f(d) {\n    return d != 0 ? ((x) -> x / d) : nil\n}\nprint f(2)"
+    acceptsDivision "var xs = [1, 0, 4]\nprint [12 / x | x <- xs | x != 0]"
+    rejectsDivision unproven "var xs = [1, 0, 4]\nprint [12 / x | x <- xs]"
+
+[<Fact>]
+let ``the elvis operator is never a guard, and its error is reported once`` () =
+    rejectsDivision unproven "fun f(d) {\n    return (d != 0 ?: 10 / d)\n}\nprint f(2)"
+
+[<Fact>]
+let ``a non-number constant divisor compiles and is left to the vm`` () =
+    acceptsDivision "print (1 / \"a\")\nprint (1 / nil)"
+
+[<Fact>]
+let ``a constant float zero divisor is a warning, not an error`` () =
+    let _, errors, warnings = resolveSourceWithWarnings "print (1 / 0.0)\nprint (1 % 0.0)"
+    Assert.Empty errors
+    Assert.Equal(2, warnings.Length)
+    Assert.All(warnings, fun w -> Assert.Contains("constant 0.0", w.Message))
+
+[<Fact>]
+let ``power is accepted with a non-zero base or a non-negative exponent`` () =
+    acceptsDivision "fun f(x) {\n    return x ^ 2\n}\nprint f(3)"
+    acceptsDivision "fun f(n) {\n    return 2 ^ n\n}\nprint f(3)"
+    acceptsDivision "fun f(x, n) {\n    return n >= 0 ? x ^ n : 1\n}\nprint f(0, 3)"
+    acceptsDivision "fun f(x, n) {\n    return x != 0 ? x ^ n : 0\n}\nprint f(2, -1)"
+    rejectsDivision "doesn't raise 0 to a negative power" "fun f(x, n) {\n    return x ^ n\n}\nprint f(2, 3)"
+    rejectsDivision "0 raised to a negative power" "print (0 ^ -1)"
+
+[<Fact>]
+let ``large constant powers are evaluated for the check`` () =
+    acceptsDivision "print ((2 ^ 2000) / (2 ^ 1999))"
+    rejectsDivision "the divisor is the constant 0" "print (1 / (0 ^ 5000000))"
+    acceptsDivision "print (1 / ((-1) ^ 5000001))"
+
+[<Fact>]
+let ``short-circuit and ternary constants are evaluated for the check`` () =
+    acceptsDivision "print (1 / (nil ?? 2))\nprint (1 / (true ? 3 : 0))\nprint (1 / (false or 4))"
+    rejectsDivision "the divisor is the constant 0" "print (1 / (false ? 3 : 0))"
+    rejectsDivision "the divisor is the constant 0" "print (1 / (true and 0))"

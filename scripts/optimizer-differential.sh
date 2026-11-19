@@ -31,7 +31,10 @@ done
 
 # Hand-written cases: errors must keep their messages and lines.
 mkdir -p "$TMP/cases"
-printf 'var a = 0\nprint 1\nprint 10 / a\n' > "$TMP/cases/divzero.iqx"
+# An integer zero divisor is a compile-time error since docs/PLAN-0.4.md
+# Phase 3, so these exercise a float zero (IEEE) and a runtime type error.
+printf 'var a = 0.0\nprint 1\nprint 10 / a\nprint 10 %% a\n' > "$TMP/cases/floatzero.iqx"
+printf 'var a = 2.5\nprint 1\nprint 10 // a\n' > "$TMP/cases/divtype.iqx"
 printf 'fun f() {\n    return limit\n}\nprint f()\nvar limit = 5\n' > "$TMP/cases/undefined_before.iqx"
 printf 'var base = 2\nvar out = [1,\n    base + 1,\n    "x" - base]\n' > "$TMP/cases/multiline.iqx"
 printf 'var debug = false\nfun f() {\n    debug ? print "dbg" : nil\n    return 1\n    print "never"\n}\nprint f()\n' > "$TMP/cases/deadcode.iqx"
@@ -57,7 +60,15 @@ def expr(d):
     if r < 0.15: return '(-' + expr(d-1) + ')'
     if r < 0.18: return '(~' + expr(d-1) + ')'
     if r < 0.2: return '((' + expr(d-1) + ') ? (' + expr(d-1) + ') : (' + expr(d-1) + '))'
-    return '(' + expr(d-1) + ' ' + random.choice(ops) + ' ' + expr(d-1) + ')'
+    op = random.choice(ops)
+    return '(' + expr(d-1) + ' ' + op + ' ' + (divisor(d-1) if op in divs else expr(d-1)) + ')'
+# Since docs/PLAN-0.4.md Phase 3 a divisor (or `^` operand pair) the
+# compiler can't prove non-zero is a compile-time error in both modes, so
+# half the time the right operand is a constant it can.
+divs = {'/', '//', '%', '^'}
+def divisor(d):
+    if random.random() < 0.5: return random.choice(['1','2','3','7','0.5','100','2.0','.25','1e300'])
+    return expr(d)
 for i in range(60):
     with open(f"{out}/f{i}.iqx", "w") as fh:
         for j in range(12):
