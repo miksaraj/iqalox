@@ -905,7 +905,8 @@ chose the whole-top-level rule (decision 10, now reworded).
   case plus a `//` type error. Random divisors the check can't prove now
   fail to compile in both modes, so half the time the generator picks a
   non-zero constant divisor instead. That keeps 166 of 210 random
-  programs running, against 132 without the change. DIFFCOUNT
+  programs running, against 132 without the change. It passes on
+  203 programs (246 before this phase).
 - **Examples.** `numbers.iqx` gains a constant divisor, a guarded one, a
   comprehension guard, and a guarded `inverse` that returns `inf` for
   `0.0`. The constant-`0.0` warning is left out, since examples compile
