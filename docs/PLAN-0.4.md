@@ -907,7 +907,9 @@ chose the whole-top-level rule (decision 10, now reworded).
   non-zero constant divisor instead. That keeps 166 of 210 random
   programs running, against 132 without the change. DIFFCOUNT
 - **Examples.** `numbers.iqx` gains a constant divisor, a guarded one, a
-  comprehension guard and IEEE float zero.
+  comprehension guard, and a guarded `inverse` that returns `inf` for
+  `0.0`. The constant-`0.0` warning is left out, since examples compile
+  without diagnostics.
 - **Docs.** `docs/LANGUAGE.md` §3 (the rule, with examples) and its error
   list.
 
