@@ -217,12 +217,12 @@ Value divide(Vm&, const Value& a, const Value& b) {
         if (std::isinf(result)) fail("Result too large to represent as a float.");
         return doubleValue(result);
     }
-    double divisor = floatOperand(b);
-    double dividend = floatOperand(a);
-    // docs/PLAN-0.4.md Phase 3 makes a float zero divisor follow IEEE; until
-    // then every zero divisor is an error, as it always has been.
-    if (divisor == 0.0) fail("Division by zero.");
-    return doubleValue(dividend / divisor);
+    // docs/PLAN-0.4.md decision 12: a float zero divisor follows IEEE
+    // (inf, -inf or nan); only an integer zero divisor is an error. The
+    // compiler proves that can't happen, so this is a backstop for bytecode
+    // it didn't produce.
+    if (isSmallInt(b) && asSmallInt(b) == 0) fail("Division by zero.");
+    return doubleValue(floatOperand(a) / floatOperand(b));
 }
 
 Value modulo(Vm& vm, const Value& a, const Value& b) {

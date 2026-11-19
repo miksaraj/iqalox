@@ -377,11 +377,45 @@ comparison or string `+` concatenation (use `concat`,
   - **Inside a vector literal** a bare `|` is cons/comprehension syntax,
     never bitwise OR. Parenthesise it there, `[(a | b), c]`; the parse
     error for `[x, a | b]` says so.
-- **Division by an integer zero** (`1 / 0`, `1 // 0`, `1 % 0`, `0 ^ -1`) is
-  currently a runtime error, `Division by zero.`, and so is division by
-  a float zero. A later `0.4` phase makes the integer case a
-  compile-time check and lets a float zero divisor give `inf`/`nan`
-  (`docs/PLAN-0.4.md` decision 12).
+- **Division by zero is a compile-time error** (new in `0.4`). The
+  divisor of every `/`, `//` and `%` must be provably non-zero. That
+  means one of two things:
+  - **A non-zero constant**: a literal, a constant expression
+    (`n / (4 - 2)`), or an immutable `var` with a constant initializer,
+    whether top-level, local or imported (`var width = 10` then
+    `n % width`). A divisor that is the constant `0` is an error,
+    "Division by zero: the divisor is the constant 0."
+  - **An immutable variable or parameter checked by a guard.** The guards
+    are `d != 0`, `d == 0` (narrowing the other branch), `d == c` for a
+    non-zero constant `c`, and orderings that exclude zero (`d > 0`,
+    `d >= 1`, `d < 0`, `0 < d`). They combine with `and`, `or` and `!`.
+    A guard covers the branches of a ternary and the right operand of
+    `and`/`or`, lambdas written inside them included, and a
+    comprehension's own guard covers its element:
+
+    ```
+    fun average(total, count) {
+        return count != 0 ? total / count : 0
+    }
+    var mean = count > 0 and total / count
+    print [12 / x | x <- xs | x != 0]
+    ```
+
+  Anything else, such as a `var mut`, a call (`n / length v`) or an
+  unchecked parameter, is rejected with "Can't prove this divisor isn't
+  zero", and the fix is to bind it to an immutable `var` and guard it.
+  The elvis operator `?:` is not a guard. A constant divisor that isn't
+  a number (`1 / "a"`) still compiles and is a runtime type error.
+- **`^` follows the same rule** for `0 ^ -1`. A `^` is fine when its base
+  is a non-zero constant or guarded (`2 ^ n`, `x != 0 ? x ^ n : 0`) or
+  its exponent is a non-negative constant or guarded (`x ^ 2`,
+  `n >= 0 ? x ^ n : 1`). A constant `0 ^ -1` is an error.
+- **A float zero divisor follows IEEE**: `1 / 0.0` is `inf`, `-1 / 0.0`
+  is `-inf`, `1 / -0.0` is `-inf`, and `0.0 / 0.0` and `5 % 0.0` are
+  `nan`. That's why `d != 0` is enough of a guard: `0.0 != 0` is true,
+  and a float zero never errors. A constant `0.0` divisor is a
+  compile-time warning, "Division by a constant 0.0 always gives inf or
+  nan."
 
 **New for `0.2`**: vectors are no longer literals-only data. `[1, 2, 3]`
 still produces a value the same way it always has, but that value now
@@ -1288,11 +1322,11 @@ recover from either kind:
   invalid escape sequence, an unexpected character), parse errors (e.g. a
   malformed ternary), resolve errors (e.g. reassigning an immutable
   variable, using `super` outside a subclass, an undeclared property, a
-  trait/mixin member conflict), and codegen errors (e.g. `break` outside
-  a loop). `iqaloxc` reports each as `[line N] Error: message` to stderr
+  trait/mixin member conflict, a divisor not proven non-zero), and
+  codegen errors (e.g. `break` outside a loop). `iqaloxc` reports each as `[line N] Error: message` to stderr
   and exits with status `65`. Compilation never reaches the VM at all if
   any stage reports an error.
-- **Runtime errors** — e.g. wrong arity, dividing by zero, a non-number
+- **Runtime errors** — e.g. wrong arity, a non-number
   operand to an arithmetic/comparison operator, an undefined
   variable/property, reading a `var mut` (or non-`mut` property) before
   its first assignment, reassigning a non-`mut` property a second time,

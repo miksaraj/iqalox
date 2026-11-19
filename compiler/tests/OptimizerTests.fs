@@ -40,8 +40,8 @@ let ``arithmetic on literals is folded to one constant`` () =
     Assert.True(has ((=) Add) (plain "var x mut = 1 + 2 * 3\nx = x"))
 
 [<Fact>]
-let ``division by a literal zero is never folded, so it still raises at runtime`` () =
-    Assert.True(has ((=) Divide) (opt "var x mut = 1 / 0\nx = x"))
+let ``division by a float zero is never folded, so the vm still produces inf`` () =
+    Assert.True(has ((=) Divide) (opt "var x mut = 1 / 0.0\nx = x"))
 
 [<Fact>]
 let ``modulo and power are never folded`` () =
@@ -182,10 +182,10 @@ let ``equality folds by type and value`` () =
 let ``anything the vm might round or reject is left unfolded`` () =
     // An int too large to convert exactly, mixed with a float.
     Assert.True(has ((=) Add) (opt "var r mut = 9007199254740993 + 0.5\nr = r"))
-    // Integer division by zero: the vm reports it (Phase 3 makes it a compile error).
-    Assert.True(has ((=) Divide) (opt "var r mut = 1 / 0\nr = r"))
+    // Division by a float zero gives inf, which is never folded.
+    Assert.True(has ((=) Divide) (opt "var r mut = 1 / 0.0\nr = r"))
     // `%` and `^` are never folded.
-    Assert.True(has ((=) Power) (opt "var r mut = 0 ^ -1\nr = r"))
+    Assert.True(has ((=) Power) (opt "var r mut = 2 ^ -1\nr = r"))
 
 [<Fact>]
 let ``integer division and bitwise operators on literals fold exactly`` () =
@@ -201,7 +201,6 @@ let ``integer division and bitwise operators on literals fold exactly`` () =
 
 [<Fact>]
 let ``what the vm must reject is left unfolded`` () =
-    Assert.True(has ((=) IntDivide) (opt "var r mut = 7 // 0\nr = r"))
     Assert.True(has ((=) IntDivide) (opt "var r mut = 7.0 // 2\nr = r"))
     Assert.True(has ((=) ShiftLeft) (opt "var r mut = 1 << -1\nr = r"))
     Assert.True(has ((=) ShiftLeft) (opt "var r mut = 1 << 100000000\nr = r"))

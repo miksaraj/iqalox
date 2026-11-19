@@ -220,8 +220,24 @@ These are the details of how exact integers meet floats that decisions
     - Only `x ^ n`, with both unknown, needs a guard.
     - A float `0.0` base gives `inf` under the IEEE rule, so the
       `x != 0` guard stays sound.
-    - Phase 3 implements it; until then the VM raises "Division by
-      zero." at runtime.
+    - Implemented in Phase 3.
+
+### Decided at Phase 3 start
+
+Asked when Phase 3 began. These settle what decision 12's "constant" and
+"guard" reach.
+
+36. **An immutable local with a constant initializer is a constant
+    divisor**, like a top-level one: `var size = 10` inside a function
+    makes `n % size` fine without a guard.
+37. **An imported immutable constant is a constant divisor too.** With
+    `pub var size = 4` in `dep`, `import dep.size` makes `n / size` fine
+    in the importer, and `pub var size = 0` is a compile-time error there.
+38. **`d == c` for a non-zero constant `c` narrows `d`** in its true
+    branch: `d == 5 ? n / d : 0` is accepted. (`d != c` narrows nothing.)
+39. **A constant divisor that isn't a number compiles** (`1 / "a"`,
+    `1 / nil`). The check is only about zero; the VM's runtime type error
+    ("Operands must be numbers.") reports the rest, as before.
 
 ### String model
 
@@ -473,9 +489,8 @@ the repository owner when its phase starts, the way `0.3`'s open question
     flow-sensitive "known non-zero" fact set carried through ternary,
     elvis, `and`/`or` and `!`, keyed by immutable binding. It reuses
     Optimizer.fs's constant evaluation for the "non-zero constant" case.
-    Placement is a Phase 3 detail: either a Resolver.fs extension or its
-    own pass between Resolver.fs and Optimizer.fs, run before
-    optimizations so `--no-optimize` gives the same diagnostics;
+    It landed as a Resolver.fs extension (Phase 3), so `--no-optimize`
+    gives the same diagnostics;
   - the same-origin import rule (decision 23);
   - the compile-time error for index-assigning a string literal.
 - **Bytecode (`Bytecode.fs`), format v4**:
@@ -517,7 +532,7 @@ land it, verified by new tests (§6).
 | Integer-only indices and slice bounds; `length` returns int | §1.9 | Done |
 | `//` integer division | §1.4 | Done |
 | Bitwise operators `& \| ~ << >>` | §1.10 | Done |
-| Compile-time division-by-zero check (incl. `0 ^ -1`); IEEE float zero | §1.12, §1.35 | Not started |
+| Compile-time division-by-zero check (incl. `0 ^ -1`); IEEE float zero | §1.12, §1.35-39 | Done |
 | Code-point strings: indexing, negative, slices, immutability | §1.13-14 | Not started |
 | String iteration (generators, spread) and ordering | §1.15-16 | Not started |
 | `\u{...}` / `\x..` escapes; raw strings `r"..."` | §1.17-18 | Not started |
@@ -649,8 +664,8 @@ print, exact mixed comparison, exact-then-round `/` and negative `^`,
   - A float or mixed case folds only when every integer involved converts
     to a double exactly (at most 2^53). Larger ones are left to the VM,
     which rounds big integers itself.
-  - `%` and `^` are still never folded, so a constant `0 ^ -1` reaches
-    the VM's runtime check until Phase 3.
+  - `%` and `^` are still never folded. (Since Phase 3 a constant
+    `0 ^ -1` is a compile-time error.)
 
 *VM.*
 - **`Value`** gains an inline `int64_t`, and a new `ObjBigInt` holds
@@ -822,16 +837,82 @@ chose the whole-top-level rule (decision 10, now reworded).
 - **Docs.** `docs/LANGUAGE.md` §3 and §5, `langspec/SYNTAX_GRAMMAR.md`
   (productions and notes) and the README's precedence table are updated.
 
-**Phase 3 — Compile-time division-by-zero check.** Decisions 12 and 35:
-- the narrowing pass, covering `^` as well as `/`, `//` and `%`;
-- the constant-`0.0` warning;
-- IEEE float-zero division in the VM;
-- bringing `Stdlib.fs`'s Iqalox sources, `langspec/examples/` and
-  `bench/` into compliance.
+**Phase 3 — Compile-time division-by-zero check — done.** Decisions 12,
+35 and 36-39 (the last four asked at the start of this phase).
 
-This phase gets its own slot because its diagnostics are the user-facing
-part. Every rejected program needs a message that says what to write
-instead.
+*Compiler.*
+- **Placement.** The check is a `Resolver.fs` extension, not its own
+  pass: the resolver already knows each binding's mutability and scope,
+  and running before `Optimizer.fs` gives `--no-optimize` the same
+  diagnostics.
+- **Shared folding.** `Optimizer.fs`'s literal folding (`foldBinary` and
+  helpers) moved to a new `compiler/src/ConstantFolding.fs`. Its
+  `evaluate` folds an unresolved `Ast.Expr` with a lookup for named
+  constants. It also folds `%`, `^` (while the result stays under 2^16
+  bits, so `(2 ^ 2000) / (2 ^ 1999)` is a constant divisor), `??`, and
+  `and`/`or`/ternary with a constant condition, as `Optimizer.fs` does.
+- **Constants.** Each `LocalVar` carries a declaration id and its constant
+  value, if it is immutable with a constant initializer (decision 36). A
+  pre-pass over the top-level statements does the same for globals, and
+  `ExportVar` carries the constant to importing modules (decision 37).
+- **Guards.** A `Facts` map, keyed by declaration id or global name,
+  records `NotIntZero` and `NotNegativeInt`. `conditionFacts` turns a
+  condition into facts for its true and false outcomes:
+  - comparisons with a numeric constant on either side, `d == c` for a
+    non-zero `c` included (decision 38);
+  - `!` swaps the two;
+  - `and`/`or` combine them by union and intersection.
+
+  They are pushed into a ternary's branches (the middle only for `?`, not
+  elvis `?:`) and into the right operand of `and`/`or`, which covers
+  lambdas written there and a comprehension's own guard (desugared to a
+  ternary). Mutable bindings never get facts.
+- **Diagnostics.**
+  - "Division by zero: the divisor is the constant 0."
+  - "Can't prove this divisor isn't zero. Divide by a constant, or by an
+    immutable variable checked first: d != 0 ? n / d : 0." The example
+    uses the operator actually written.
+  - "Division by zero: 0 raised to a negative power." for a constant
+    `0 ^ -1`.
+  - "Can't prove this '^' doesn't raise 0 to a negative power...", with
+    both fixes.
+  - The warning "Division by a constant 0.0 always gives inf or nan."
+    (not for `//`, which rejects floats anyway).
+
+  Elvis resolves its condition twice, so checks are deduplicated by
+  token position. A constant that isn't a number compiles (decision 39).
+- **Compliance.** No change needed. Every existing divisor in
+  `Stdlib.fs`, `langspec/examples/` and `bench/` was already a literal or
+  an immutable constant. Four xUnit tests that divided by `var mut`s or a
+  literal zero were rewritten.
+
+*VM.*
+- **IEEE.** `numeric.cpp`'s `/` divides floats directly, so a float zero
+  divisor gives `inf`/`-inf`/`nan`; `%` already gave `nan`. An integer
+  zero divisor still raises "Division by zero." as a backstop.
+
+*Verification.*
+- **Tests.**
+  - xUnit: 387, up from 367. New cases cover every guard form and its
+    negative twin, constant chains (global, local, imported, large
+    powers, short-circuit), mutable and call divisors, lambdas,
+    comprehensions, elvis (one error, not two), non-number divisors, the
+    `0.0` warning and the `^` rules.
+  - Catch2: still 140; the "float zero divisor is an error" test became
+    an IEEE one (`inf`, `-inf`, `-0.0`, `nan`, `%`).
+- **Sanitizers.** Clean under ASan/UBSan.
+- **Optimizer differential.** Its integer-zero case became a float-zero
+  case plus a `//` type error. Random divisors the check can't prove now
+  fail to compile in both modes, so half the time the generator picks a
+  non-zero constant divisor instead. That keeps 166 of 210 random
+  programs running, against 132 without the change. It passes on
+  203 programs (246 before this phase).
+- **Examples.** `numbers.iqx` gains a constant divisor, a guarded one, a
+  comprehension guard, and a guarded `inverse` that returns `inf` for
+  `0.0`. The constant-`0.0` warning is left out, since examples compile
+  without diagnostics.
+- **Docs.** `docs/LANGUAGE.md` §3 (the rule, with examples) and its error
+  list.
 
 **Phase 4 — The string model.** Decisions 13-19:
 - the UTF-8 + ASCII-flag representation;

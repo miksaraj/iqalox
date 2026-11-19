@@ -418,7 +418,7 @@ own `sort`/`push` can never clobber a native in the VM's flat global table.
 
 ## Architecture (`compiler/` + `vm/`, 0.4)
 
-**In progress: Phases 0 (dependency plumbing), 1 (the integer type) and 2 (`//` and bitwise operators) have landed.** See `docs/PLAN-0.4.md`. Its §1 records 29
+**In progress: Phases 0 (dependency plumbing), 1 (the integer type), 2 (`//` and bitwise operators) and 3 (the compile-time division-by-zero check) have landed.** See `docs/PLAN-0.4.md`. Its §1 records the
 design decisions the repository owner settled before any code. **Treat them as
 decided; don't re-open them.** The handful still pending are listed in §2 and
 are to be asked when their phase starts. In outline:
@@ -484,6 +484,20 @@ Phase 2 added `//` and the bitwise operators:
   `commaAsOperator`) makes a bare `|` at the top level of a vector
   literal cons/comprehension syntax, never OR. Parentheses and
   index/slice brackets turn OR back on.
+
+Phase 3 added the compile-time division-by-zero check:
+- **Where.** In `Resolver.fs`, so `--no-optimize` reports the same errors.
+  The divisor of `/`, `//` and `%`, and the operands of `^`, must be a
+  non-zero constant or an immutable binding narrowed by a guard.
+- **Constants.** `compiler/src/ConstantFolding.fs` holds the folding rules
+  shared with `Optimizer.fs`, plus `evaluate`, which the check uses.
+  Immutable locals, globals and imported `pub var`s with constant
+  initializers count (`ExportVar` carries the constant across modules).
+- **Guards.** A `Facts` map (`NotIntZero`, `NotNegativeInt`) keyed by a
+  binding's declaration id, pushed into ternary branches and the right
+  operand of `and`/`or`. Only immutable bindings are narrowed.
+- **VM.** A float zero divisor gives IEEE `inf`/`nan`. The integer-zero
+  "Division by zero." check stays as a backstop.
 
 ## Engineering conventions
 

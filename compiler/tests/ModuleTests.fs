@@ -375,3 +375,17 @@ let ``a module in a subdirectory is named by its relative path with forward slas
     let linked = linkAuto [ "main", "import math.vector.f\nprint f()"; "math.vector", "pub fun f() {\n    return 1\n}" ]
     let _, fileNames, _ = compileSegments linked.Segments
     Assert.Contains("math/vector.iqx", fileNames)
+
+// --- docs/PLAN-0.4.md Phase 3: imported constants as divisors ---
+
+[<Fact>]
+let ``an imported immutable constant counts as a constant divisor`` () =
+    let ok = linkAuto [ "main", "import dep.size\nprint (10 / size)"; "dep", "pub var size = 4" ]
+    Assert.Empty(errorsOf ok "main")
+    let zero = linkAuto [ "main", "import dep.size\nprint (10 / size)"; "dep", "pub var size = 2 - 2" ]
+    Assert.Contains(errorsOf zero "main", fun m -> m.Contains "the divisor is the constant 0")
+
+[<Fact>]
+let ``an imported mutable variable does not count as a constant divisor`` () =
+    let linked = linkAuto [ "main", "import dep.size\nprint (10 / size)"; "dep", "pub var size mut = 4" ]
+    Assert.Contains(errorsOf linked "main", fun m -> m.Contains "Can't prove this divisor isn't zero")

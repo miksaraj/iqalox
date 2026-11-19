@@ -9,6 +9,7 @@
     <Compile Include="Ast.fs" />
     <Compile Include="Parser.fs" />
     <Compile Include="Bound.fs" />
+    <Compile Include="ConstantFolding.fs" />
     <Compile Include="Stdlib.fs" />
     <Compile Include="Resolver.fs" />
     <Compile Include="Modules.fs" />

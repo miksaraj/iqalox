@@ -118,7 +118,14 @@ TEST_CASE("division with / always gives a float, computed exactly and rounded on
 
     REQUIRE_THROWS_AS(numeric::divide(vm, powerOfTwo(vm, 1100), i(1)), RuntimeError);  // result too large
     REQUIRE_THROWS_AS(numeric::divide(vm, i(1), i(0)), RuntimeError);
-    REQUIRE_THROWS_AS(numeric::divide(vm, f(1.0), f(0.0)), RuntimeError);  // until Phase 3
+    // A float zero divisor follows IEEE (docs/PLAN-0.4.md decision 12).
+    REQUIRE(numeric::compare(numeric::divide(vm, f(1.0), f(0.0)), f(INFINITY)) == std::partial_ordering::equivalent);
+    REQUIRE(sameDouble(numeric::divide(vm, i(-1), f(0.0)), -INFINITY));
+    REQUIRE(sameDouble(numeric::divide(vm, i(1), f(-0.0)), -INFINITY));
+    REQUIRE(std::isnan(asDouble(numeric::divide(vm, f(0.0), f(0.0)))));
+    REQUIRE(std::isnan(asDouble(numeric::modulo(vm, i(5), f(0.0)))));
+    // An integer zero divisor stays an error, even with a float dividend.
+    REQUIRE_THROWS_AS(numeric::divide(vm, f(1.0), i(0)), RuntimeError);
 }
 
 TEST_CASE("^ gives an exact int for a non-negative exponent, a rounded float otherwise", "[numeric]") {

@@ -54,7 +54,14 @@ type private LocalVar =
       IsMutable: bool
       Depth: int
       NameToken: Token option
-      mutable Used: bool }
+      mutable Used: bool
+      /// Unique per declaration, so the division-by-zero check
+      /// (`docs/PLAN-0.4.md` decision 12) can key what it knows about a
+      /// binding by identity rather than by slot (slots are reused).
+      Id: int
+      /// The value of an immutable `var` whose initializer is a
+      /// compile-time constant (Phase 3), else None.
+      Constant: LiteralValue option }
 type private UpvalueEntry = { Name: string; Descriptor: UpvalueDescriptor; IsMutable: bool }
 
 type private FunctionContext(enclosing: FunctionContext option) =
@@ -500,6 +507,90 @@ let private findDeclaredMethod (effectiveMembers: Dictionary<string, MemberSet>)
 /// decision 4, open question 3).
 let private isExemptFromUnusedCheckName (lexeme: string) = lexeme.StartsWith "_"
 
+// ---------------------------------------------------------------------------
+// The division-by-zero check (`docs/PLAN-0.4.md` decisions 12 and 35, Phase 3)
+// ---------------------------------------------------------------------------
+
+/// Which declaration a fact is about: a local by its unique id, a global by
+/// name. Only immutable bindings ever get facts.
+type private FactKey =
+    | LocalKey of int
+    | GlobalKey of string
+
+/// What a guard proves about an immutable binding inside the branch it
+/// guards. `NotIntZero`: the value isn't the integer 0, so dividing by it
+/// (`/`, `//`, `%`) can't hit the integer-zero error (a float zero gives
+/// inf/nan under decision 12). `NotNegativeInt`: the value isn't a negative
+/// integer, so it can serve as a `^` exponent without the `0 ^ -n` error.
+type private Fact = { NotIntZero: bool; NotNegativeInt: bool }
+
+type private Facts = Map<FactKey, Fact>
+
+let private factsUnion (a: Facts) (b: Facts) : Facts =
+    b
+    |> Map.fold
+        (fun acc key fact ->
+            match Map.tryFind key acc with
+            | Some existing ->
+                acc.Add(
+                    key,
+                    { NotIntZero = existing.NotIntZero || fact.NotIntZero
+                      NotNegativeInt = existing.NotNegativeInt || fact.NotNegativeInt }
+                )
+            | None -> acc.Add(key, fact))
+        a
+
+let private factsIntersect (a: Facts) (b: Facts) : Facts =
+    a
+    |> Map.fold
+        (fun acc key fact ->
+            match Map.tryFind key b with
+            | Some other ->
+                let merged =
+                    { NotIntZero = fact.NotIntZero && other.NotIntZero
+                      NotNegativeInt = fact.NotNegativeInt && other.NotNegativeInt }
+                if merged.NotIntZero || merged.NotNegativeInt then acc.Add(key, merged) else acc
+            | None -> acc)
+        Map.empty
+
+/// Exact three-way comparison of a numeric constant with an integer.
+let private compareConstant (c: LiteralValue) (n: int) : int option =
+    match c with
+    | IntValue v -> Some(compare v (bigint n))
+    | FloatValue v when not (System.Double.IsNaN v) -> Some(compare v (float n))
+    | _ -> None
+
+/// What `x OP c` proves about `x` when it holds and when it doesn't, for an
+/// immutable binding `x` and a numeric constant `c` (`OP` already oriented
+/// with `x` on the left). The guards decision 12 lists: `!= 0` / `== 0`,
+/// `==` with a non-zero constant (Phase 3), and orderings against a
+/// constant that excludes zero (or, for `^`, a negative integer).
+let private comparisonFacts (key: FactKey) (op: TokenType) (c: LiteralValue) : Facts * Facts =
+    let fact notIntZero notNegativeInt : Facts =
+        if notIntZero || notNegativeInt then
+            Map.ofList [ key, { NotIntZero = notIntZero; NotNegativeInt = notNegativeInt } ]
+        else
+            Map.empty
+    let vs n = compareConstant c n |> Option.defaultValue 0
+    let isIntZero = (match c with IntValue v -> v.IsZero | _ -> false)
+    // x == c: x is exactly c. Not an integer zero unless c is, and not a
+    // negative integer unless c is (a float c makes x a float, which `^`
+    // handles without the zero-division error).
+    let equalFacts =
+        fact (not isIntZero) (match c with IntValue v -> v.Sign >= 0 | _ -> true)
+    let greater = fact (vs 0 >= 0) (vs -1 >= 0) // x > c
+    let greaterEqual = fact (vs 0 > 0) (vs -1 > 0) // x >= c
+    let less = fact (vs 0 <= 0) false // x < c
+    let lessEqual = fact (vs 0 < 0) false // x <= c
+    match op with
+    | EqualEqual -> equalFacts, (if isIntZero then fact true false else Map.empty)
+    | BangEqual -> (if isIntZero then fact true false else Map.empty), equalFacts
+    | Greater -> greater, lessEqual
+    | GreaterEqual -> greaterEqual, less
+    | Less -> less, greaterEqual
+    | LessEqual -> lessEqual, greater
+    | _ -> Map.empty, Map.empty
+
 type private Resolver
     (
         globals: Dictionary<string, bool>,
@@ -507,7 +598,8 @@ type private Resolver
         aliases: Dictionary<string, string>,
         importHints: Map<string, string>,
         classes: Dictionary<string, ClassInfo>,
-        effectiveMembers: Dictionary<string, MemberSet>
+        effectiveMembers: Dictionary<string, MemberSet>,
+        globalConstants: Dictionary<string, LiteralValue>
     ) =
     let errors = ResizeArray<ResolveError>()
     let mutable context = FunctionContext(None)
@@ -593,7 +685,22 @@ type private Resolver
                     GlobalBinding target, Some isMutable
                 | false, _ -> GlobalBinding name, None
 
-    let declareVariable (name: Token) (isMutable: bool) : DeclaredBinding =
+    let mutable nextDeclarationId = 0
+
+    // What the enclosing guards prove about immutable bindings at the point
+    // currently being resolved (decision 12). Lexically scoped: `withFacts`
+    // adds to it for one branch and restores it afterward.
+    let mutable facts: Facts = Map.empty
+
+    let withFacts (extra: Facts) (resolveBranch: unit -> 'T) : 'T =
+        let saved = facts
+        facts <- factsUnion facts extra
+        try
+            resolveBranch ()
+        finally
+            facts <- saved
+
+    let declareVariableWithConstant (name: Token) (isMutable: bool) (constant: LiteralValue option) : DeclaredBinding =
         if context.ScopeDepth = 0 then
             // Pre-registered by preRegisterGlobals already -- nothing left
             // to check or insert here.
@@ -610,8 +717,143 @@ type private Resolver
                   IsMutable = isMutable
                   Depth = context.ScopeDepth
                   NameToken = Some name
-                  Used = false }
+                  Used = false
+                  Id = (nextDeclarationId <- nextDeclarationId + 1; nextDeclarationId)
+                  Constant = if isMutable then None else constant }
             DeclaredLocal slot
+
+    let declareVariable (name: Token) (isMutable: bool) : DeclaredBinding =
+        declareVariableWithConstant name isMutable None
+
+    /// The declaration `name` refers to at this point, without any of
+    /// `resolveReference`'s side effects (marking used, capturing upvalues):
+    /// its fact key, whether it's mutable, and its constant value if any.
+    let lookupDeclaration (name: string) : (FactKey * bool * LiteralValue option) option =
+        let rec inContext (ctx: FunctionContext) =
+            match findLocal ctx name with
+            | Some local -> Some(LocalKey local.Id, local.IsMutable, local.Constant)
+            | None -> ctx.Enclosing |> Option.bind inContext
+        match inContext context with
+        | Some found -> Some found
+        | None ->
+            match globals.TryGetValue name with
+            | true, isMutable ->
+                let constant =
+                    match isMutable, globalConstants.TryGetValue name with
+                    | false, (true, value) -> Some value
+                    | _ -> None
+                Some(GlobalKey name, isMutable, constant)
+            | false, _ -> None
+
+    let constantOf (expr: Expr) : LiteralValue option =
+        ConstantFolding.evaluate
+            (fun name ->
+                match lookupDeclaration name.Lexeme with
+                | Some(_, false, constant) -> constant
+                | _ -> None)
+            expr
+
+    /// The fact key of an expression that is (possibly parenthesised) a bare
+    /// reference to an immutable binding.
+    let rec immutableSubject (expr: Expr) : FactKey option =
+        match expr with
+        | Grouping inner -> immutableSubject inner
+        | Variable name ->
+            match lookupDeclaration name.Lexeme with
+            | Some(key, false, _) -> Some key
+            | _ -> None
+        | _ -> None
+
+    let numericConstant (expr: Expr) =
+        match constantOf expr with
+        | Some(IntValue _ | FloatValue _ as c) -> Some c
+        | _ -> None
+
+    /// What a condition proves when it's truthy and when it's falsy.
+    let rec conditionFacts (expr: Expr) : Facts * Facts =
+        match expr with
+        | Grouping inner -> conditionFacts inner
+        | Unary(op, inner) when op.Type = Bang ->
+            let whenTrue, whenFalse = conditionFacts inner
+            whenFalse, whenTrue
+        | Logical(left, op, right) when op.Type = And ->
+            let lt, lf = conditionFacts left
+            let rt, rf = conditionFacts right
+            factsUnion lt rt, factsIntersect lf (factsUnion lt rf)
+        | Logical(left, op, right) when op.Type = Or ->
+            let lt, lf = conditionFacts left
+            let rt, rf = conditionFacts right
+            factsIntersect lt (factsUnion lf rt), factsUnion lf rf
+        | Binary(left, op, right) ->
+            let flipped =
+                match op.Type with
+                | Greater -> Less
+                | GreaterEqual -> LessEqual
+                | Less -> Greater
+                | LessEqual -> GreaterEqual
+                | other -> other
+            match immutableSubject left, numericConstant right, immutableSubject right, numericConstant left with
+            | Some key, Some c, _, _ -> comparisonFacts key op.Type c
+            | _, _, Some key, Some c -> comparisonFacts key flipped c
+            | _ -> Map.empty, Map.empty
+        | _ -> Map.empty, Map.empty
+
+    let knows (expr: Expr) (property: Fact -> bool) =
+        match immutableSubject expr with
+        | Some key -> facts |> Map.tryFind key |> Option.exists property
+        | None -> false
+
+    // Elvis resolves its condition twice (as condition and as value), so a
+    // check failing inside it would be reported twice without this.
+    let reportedChecks = HashSet<int * int * string>()
+    let checkError (token: Token) (message: string) =
+        if reportedChecks.Add((token.Line, token.Column, message)) then
+            error token message
+
+    /// `/`, `//` and `%`: the divisor must be a non-zero constant, or an
+    /// immutable binding a guard has proved isn't the integer 0.
+    let checkDivisor (operator: Token) (divisor: Expr) =
+        match constantOf divisor with
+        | Some(IntValue v) when v.IsZero -> checkError operator "Division by zero: the divisor is the constant 0."
+        | Some(FloatValue v) when v = 0.0 ->
+            // Well defined (inf or nan), but almost always a mistake. `//`
+            // rejects any float operand at runtime anyway.
+            if operator.Type <> SlashSlash then
+                warn operator "Division by a constant 0.0 always gives inf or nan."
+        | Some _ -> () // a non-zero constant, or not a number (a runtime type error, never a zero)
+        | None ->
+            if not (knows divisor (fun f -> f.NotIntZero)) then
+                checkError
+                    operator
+                    $"Can't prove this divisor isn't zero. Divide by a constant, or by an immutable variable checked first: d != 0 ? n {operator.Lexeme} d : 0."
+
+    /// `^` (decision 35): the integer `0 ^ -n` divides by zero, so either
+    /// the base must be known not to be the integer 0, or the exponent known
+    /// not to be a negative integer.
+    let checkPower (operator: Token) (baseExpr: Expr) (exponent: Expr) =
+        let baseConstant = constantOf baseExpr
+        let exponentConstant = constantOf exponent
+        match baseConstant, exponentConstant with
+        | Some(IntValue b), Some(IntValue e) when b.IsZero && e.Sign < 0 ->
+            checkError operator "Division by zero: 0 raised to a negative power."
+        | _ ->
+            let baseSafe =
+                match baseConstant with
+                | Some(IntValue b) -> not b.IsZero
+                | Some(FloatValue b) -> b <> 0.0
+                | Some _ -> true
+                | None -> knows baseExpr (fun f -> f.NotIntZero)
+            let exponentSafe =
+                match exponentConstant with
+                | Some(IntValue e) -> e.Sign >= 0
+                | Some(FloatValue e) -> e >= 0.0
+                | Some _ -> true
+                | None -> knows exponent (fun f -> f.NotNegativeInt)
+            if not (baseSafe || exponentSafe) then
+                checkError
+                    operator
+                    "Can't prove this '^' doesn't raise 0 to a negative power. Use a non-zero constant base or a non-negative constant exponent, or check one first: x != 0 ? x ^ n : 0, or n >= 0 ? x ^ n : 1."
+
 
     member this.Errors = List.ofSeq errors
     member this.WasGlobalRead(name: string) = usedGlobalNames.Contains name
@@ -671,7 +913,10 @@ type private Resolver
             // (the initializer is evaluated before `environment.define`
             // runs).
             let boundInit = initializer |> Option.map this.ResolveExpr
-            let binding = declareVariable name isMutable
+            // Evaluated before declaring, like the initializer itself, so
+            // `var x = x` sees the outer `x`.
+            let constant = if isMutable then None else initializer |> Option.bind constantOf
+            let binding = declareVariableWithConstant name isMutable constant
             BVarStmt(binding, name, boundInit)
         | ForStmt(initializer, condition, increment, body) ->
             beginScope ()
@@ -718,7 +963,9 @@ type private Resolver
                       IsMutable = false
                       Depth = context.ScopeDepth
                       NameToken = None
-                      Used = true }
+                      Used = true
+                      Id = -1
+                      Constant = None }
 
             // `classes.[name.Lexeme]`'s Inlined*/* already has this
             // class's own body merged with every `use`d trait's members
@@ -796,7 +1043,9 @@ type private Resolver
                   IsMutable = false
                   Depth = context.ScopeDepth
                   NameToken = None
-                  Used = true }
+                  Used = true
+                  Id = -2
+                  Constant = None }
 
         // Parameters are always immutable locals, matching poc (no
         // grammar exists for an individual mutable parameter).
@@ -835,13 +1084,37 @@ type private Resolver
             | Some true -> ()
             | None -> () // an as-yet-unresolved global -- deferred to runtime, same as poc today
             BAssign(binding, name, boundValue)
-        | Binary(left, operator, right) -> BBinary(this.ResolveExpr left, operator, this.ResolveExpr right)
-        | Logical(left, operator, right) -> BLogical(this.ResolveExpr left, operator, this.ResolveExpr right)
+        | Binary(left, operator, right) ->
+            match operator.Type with
+            | Slash
+            | SlashSlash
+            | Percent -> checkDivisor operator right
+            | Power -> checkPower operator left right
+            | _ -> ()
+            BBinary(this.ResolveExpr left, operator, this.ResolveExpr right)
+        | Logical(left, operator, right) ->
+            // The right operand only runs when the left one is truthy (`and`)
+            // or falsy (`or`), so it's narrowed accordingly (decision 12).
+            let whenTrue, whenFalse = conditionFacts left
+            let boundLeft = this.ResolveExpr left
+            let boundRight = withFacts (if operator.Type = And then whenTrue else whenFalse) (fun () -> this.ResolveExpr right)
+            BLogical(boundLeft, operator, boundRight)
         | Grouping inner -> BGrouping(this.ResolveExpr inner)
         | Literal value -> BLiteral value
         | Unary(operator, right) -> BUnary(operator, this.ResolveExpr right)
         | Ternary(left, leftOp, middle, rightOp, right) ->
-            BTernary(this.ResolveExpr left, leftOp, this.ResolveExpr middle, rightOp, this.ResolveExpr right)
+            // Each branch is narrowed by what the condition proves there.
+            // For elvis (`c ?: r`) the middle *is* the condition, so only
+            // the right branch, which runs when it's falsy, is narrowed.
+            let whenTrue, whenFalse = conditionFacts left
+            let boundLeft = this.ResolveExpr left
+            let boundMiddle =
+                if leftOp.Type = QuestionMark then
+                    withFacts whenTrue (fun () -> this.ResolveExpr middle)
+                else
+                    this.ResolveExpr middle
+            let boundRight = withFacts whenFalse (fun () -> this.ResolveExpr right)
+            BTernary(boundLeft, leftOp, boundMiddle, rightOp, boundRight)
         | Vector values -> BVector(values |> List.map this.ResolveExpr)
         | Spread(expr, ellipsis) -> BSpread(this.ResolveExpr expr, ellipsis)
         | Variable name ->
@@ -1076,7 +1349,10 @@ let private nativeGlobals = [ "print" ]
 /// its fully flattened one -- since the exporter's own raw class/trait
 /// tables mean nothing in the importer's name space.
 type ExportKind =
-    | ExportVar
+    /// An exported `var`'s compile-time constant value, if it's immutable and
+    /// has one, so the division-by-zero check (`docs/PLAN-0.4.md` Phase 3)
+    /// sees through imports.
+    | ExportVar of constant: LiteralValue option
     | ExportFun
     | ExportClass of effective: MemberSet
     | ExportTrait of flattened: MemberSet
@@ -1175,7 +1451,7 @@ let private resolveInternal
                       Properties = flattened.Properties |> Map.toList |> List.map snd
                       Methods = flattened.Methods |> Map.toList |> List.map snd
                       UsedTraitNames = [] }
-            | ExportVar
+            | ExportVar _
             | ExportFun -> ()
 
     let seeded = Set.ofSeq globals.Keys
@@ -1196,7 +1472,28 @@ let private resolveInternal
     // error instead of silently vanishing.
     let nonTraitStmts = stmts |> List.filter (function TraitStmt _ -> false | _ -> true)
 
-    let resolver = Resolver(globals, globalDecls, aliases, importHints, classes, effectiveMembers)
+    // Compile-time constants among this unit's immutable top-level `var`s and
+    // its imports, for the division-by-zero check (Phase 3). In declaration
+    // order, so a constant can be built from earlier ones; textual order
+    // doesn't otherwise matter, since reading a global before it's defined
+    // is a runtime "undefined" error, never a division by zero.
+    let globalConstants = Dictionary<string, LiteralValue>()
+    for import in imports do
+        match import.Kind with
+        | ExportVar(Some value) -> globalConstants.[import.Local.Lexeme] <- value
+        | _ -> ()
+    for stmt in stmts do
+        match stmt with
+        | VarStmt(name, Some initializer, false) ->
+            let lookup (n: Token) =
+                match globalConstants.TryGetValue n.Lexeme with
+                | true, v -> Some v
+                | false, _ -> None
+            ConstantFolding.evaluate lookup initializer
+            |> Option.iter (fun v -> globalConstants.[name.Lexeme] <- v)
+        | _ -> ()
+
+    let resolver = Resolver(globals, globalDecls, aliases, importHints, classes, effectiveMembers, globalConstants)
     let bound = nonTraitStmts |> List.map resolver.ResolveStmt
     // Both must run after every top-level/class/method body above has
     // resolved, so `usedSelfNames`/`usedGlobalNames` (populated along the
@@ -1234,7 +1531,12 @@ let private resolveInternal
                 stmts
                 |> List.tryPick (fun stmt ->
                     match stmt with
-                    | VarStmt(n, _, _) when n.Lexeme = name -> Some ExportVar
+                    | VarStmt(n, _, isMutable) when n.Lexeme = name ->
+                        let constant =
+                            match isMutable, globalConstants.TryGetValue name with
+                            | false, (true, value) -> Some value
+                            | _ -> None
+                        Some(ExportVar constant)
                     | FunctionStmt d when d.Name.Lexeme = name -> Some ExportFun
                     | ClassStmt(n, _, _, _, _, _) when n.Lexeme = name ->
                         match effectiveMembers.TryGetValue name with
