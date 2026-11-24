@@ -418,7 +418,7 @@ own `sort`/`push` can never clobber a native in the VM's flat global table.
 
 ## Architecture (`compiler/` + `vm/`, 0.4)
 
-**In progress: Phases 0 (dependency plumbing), 1 (the integer type), 2 (`//` and bitwise operators) and 3 (the compile-time division-by-zero check) have landed.** See `docs/PLAN-0.4.md`. Its §1 records the
+**In progress: Phases 0 (dependency plumbing), 1 (the integer type), 2 (`//` and bitwise operators), 3 (the compile-time division-by-zero check) and 4 (the string model) have landed.** See `docs/PLAN-0.4.md`. Its §1 records the
 design decisions the repository owner settled before any code. **Treat them as
 decided; don't re-open them.** The handful still pending are listed in §2 and
 are to be asked when their phase starts. In outline:
@@ -498,6 +498,19 @@ Phase 3 added the compile-time division-by-zero check:
   operand of `and`/`or`. Only immutable bindings are narrowed.
 - **VM.** A float zero divisor gives IEEE `inf`/`nan`. The integer-zero
   "Division by zero." check stays as a backstop.
+
+Phase 4 added the string model:
+- **Representation.** `ObjString` is UTF-8 plus a code-point `length`;
+  non-ASCII strings build a code-point offset table on first index
+  (`vm/src/utf8.hpp`). Every `ObjString` must hold valid UTF-8: the loader
+  checks constants, and anything that cuts a string must cut at
+  code-point boundaries.
+- **One-character strings.** `Vm::stringCharacter` returns one of 128
+  cached ASCII strings when it can; use it rather than allocating.
+- **Iteration.** Comprehension generators use the `IterableLength`
+  opcode, which accepts strings. Cons keeps `VectorLength`, which doesn't.
+- **Source.** `Scanner.decodeSource` decodes strictly; `\u{...}`, `\x..`
+  and raw `r"..."` strings are scanned in `Scanner.fs`.
 
 ## Engineering conventions
 

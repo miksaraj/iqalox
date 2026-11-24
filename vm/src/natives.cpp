@@ -116,8 +116,13 @@ Value nativePop(Vm&, const std::vector<Value>& args) {
 }
 
 Value nativeLength(Vm&, const std::vector<Value>& args) {
+    // docs/PLAN-0.4.md decisions 14 and 42: a string's length counts code
+    // points.
+    if (isObj(args[0]) && asObj(args[0])->type == ObjType::String) {
+        return smallIntValue(static_cast<int64_t>(static_cast<ObjString*>(asObj(args[0]))->length));
+    }
     if (!isObj(args[0]) || asObj(args[0])->type != ObjType::Vector) {
-        throw RuntimeError("Only vectors have a length, got " + typeName(args[0]) + ".");
+        throw RuntimeError("Only vectors and strings have a length, got " + typeName(args[0]) + ".");
     }
     return smallIntValue(static_cast<int64_t>(static_cast<ObjVector*>(asObj(args[0]))->elements.size()));
 }

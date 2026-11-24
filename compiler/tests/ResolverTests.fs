@@ -865,3 +865,18 @@ let ``short-circuit and ternary constants are evaluated for the check`` () =
     acceptsDivision "print (1 / (nil ?? 2))\nprint (1 / (true ? 3 : 0))\nprint (1 / (false or 4))"
     rejectsDivision "the divisor is the constant 0" "print (1 / (false ? 3 : 0))"
     rejectsDivision "the divisor is the constant 0" "print (1 / (true and 0))"
+
+// --- docs/PLAN-0.4.md Phase 4: string immutability ---
+
+[<Fact>]
+let ``assigning into a string literal is a compile-time error`` () =
+    let _, errors = resolveSource "\"abc\"[0] = \"x\""
+    Assert.Single errors |> ignore
+    Assert.Contains("Strings are immutable", errors.Head.Message)
+    let _, errors = resolveSource "(\"abc\")[0] = \"x\""
+    Assert.Single errors |> ignore
+
+[<Fact>]
+let ``assigning into a string variable is left to the vm`` () =
+    let _, errors = resolveSource "var s = \"abc\"\ns[0] = \"x\""
+    Assert.Empty errors

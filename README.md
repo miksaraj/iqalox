@@ -66,7 +66,13 @@ references. You'll find the **syntax grammar** in `langspec/`; the
                     | DIGITS EXPONENT ;
     EXPONENT        → ( "e" | "E" ) ( "+" | "-" )? DIGITS ;
     DIGITS          → DIGIT ( DIGIT | "_" )* ;
-    STRING          → '"' <any char except '"'>* '"' | "'" <any char except "'">* "'" ;
+    STRING          → '"' ( <any char except '"' or '\'> | ESCAPE )* '"'
+                    | "'" ( <any char except "'" or '\'> | ESCAPE )* "'"
+                    | "r" '"' <any char except '"'>* '"'
+                    | "r" "'" <any char except "'">* "'" ;
+    ESCAPE          → '\' ( 'n' | 't' | 'r' | '\' | "'" | '"' | '0' )
+                    | '\x' HEXDIGIT HEXDIGIT
+                    | '\u{' HEXDIGIT{1,6} '}' ;
     IDENTIFIER      → ALPHA ( ALPHA | DIGIT )* ;
     ALPHA           → 'a' ... 'z' | 'A' ... 'Z' | '_' ;
     DIGIT           → '0' ... '9' ;

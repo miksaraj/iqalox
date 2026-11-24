@@ -63,6 +63,7 @@ let disassembleInstruction (chunk: Chunk) (index: int) : string =
     | BitNot -> simple "BIT_NOT"
     | ShiftLeft -> simple "SHIFT_LEFT"
     | ShiftRight -> simple "SHIFT_RIGHT"
+    | IterableLength -> simple "ITERABLE_LENGTH"
     | Negate -> simple "NEGATE"
     | Not -> simple "NOT"
     | Equal -> simple "EQUAL"

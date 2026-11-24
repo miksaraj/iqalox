@@ -93,7 +93,7 @@ let rec private lineOfExpr (expr: BoundExpr) : int option =
     | BIndexSet(_, _, _, bracket) -> Some bracket.Line
     | BSlice(_, _, _, bracket) -> Some bracket.Line
     | BLambda decl -> Some decl.Name.Line
-    | BVectorLengthInternal vector -> lineOfExpr vector
+    | BVectorLengthInternal(vector, _) -> lineOfExpr vector
     | BVectorAppendInternal(vector, _) -> lineOfExpr vector
     | BSelf(_, keyword) -> Some keyword.Line
     | BSuper(_, _, keyword, _) -> Some keyword.Line
@@ -178,6 +178,7 @@ let private stackEffect (instr: Instruction) : int =
     | GetIndex -> -1
     | SetIndex -> -2
     | VectorLength -> 0
+    | IterableLength -> 0
     | VectorAppend -> -2
     // Pops source + target, pushes target back: net -1.
     | VectorExtend -> -1
@@ -524,9 +525,9 @@ type private Codegen(elideEpilogue: bool) =
             // handled entirely within `BVector`'s case above -- never
             // reached through this top-level dispatch.
             failwith "unreachable: BSpread only ever appears inside BVector's values list"
-        | BVectorLengthInternal vector ->
+        | BVectorLengthInternal(vector, iterable) ->
             this.CompileExpr vector
-            state.Emit VectorLength |> ignore
+            state.Emit(if iterable then IterableLength else VectorLength) |> ignore
         | BVectorAppendInternal(vector, value) ->
             this.CompileExpr vector
             this.CompileExpr value

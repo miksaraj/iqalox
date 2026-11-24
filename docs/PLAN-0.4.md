@@ -288,6 +288,25 @@ Asked when Phase 3 began. These settle what decision 12's "constant" and
     (decision 28) and the character classification for `isLetter` and
     friends.
 
+### Decided at Phase 4 start
+
+Asked when Phase 4 began: the edges decisions 13-19 didn't reach.
+
+40. **A source file that isn't valid UTF-8 is a compile-time error**
+    ("Source file is not valid UTF-8.", on the line of the first bad
+    byte), never silently replaced with U+FFFD. A leading UTF-8
+    byte-order mark is skipped.
+41. **A raw string may span lines**, like an ordinary string.
+42. **`std.vector.length` takes a string already in Phase 4**, returning
+    its length in code points. Phase 6 only adds the `std.string` export
+    (decision 23); `reverse` stays vector-only until then.
+43. **No Unicode normalization.** Equality and ordering compare code
+    points as written, as Python, Rust, Go, Java and JavaScript do:
+    `"\u{E9}" != "e\u{301}"`, and their lengths are 1 and 2.
+44. **Cons stays vector-only.** `["a" | "bc"]` is a runtime error;
+    decision 15's iteration covers comprehension generators and spread,
+    and `[x, ..."bc"]` is the way to write it.
+
 ### Standard library
 
 22. **Conventions shared by all three new modules**:
@@ -533,9 +552,9 @@ land it, verified by new tests (§6).
 | `//` integer division | §1.4 | Done |
 | Bitwise operators `& \| ~ << >>` | §1.10 | Done |
 | Compile-time division-by-zero check (incl. `0 ^ -1`); IEEE float zero | §1.12, §1.35-39 | Done |
-| Code-point strings: indexing, negative, slices, immutability | §1.13-14 | Not started |
-| String iteration (generators, spread) and ordering | §1.15-16 | Not started |
-| `\u{...}` / `\x..` escapes; raw strings `r"..."` | §1.17-18 | Not started |
+| Code-point strings: indexing, negative, slices, immutability | §1.13-14, §1.42-43 | Done |
+| String iteration (generators, spread) and ordering | §1.15-16, §1.44 | Done |
+| `\u{...}` / `\x..` escapes; raw strings `r"..."` | §1.17-19, §1.40-41 | Done |
 | `std.math` | §1.11, §1.26 | Not started |
 | `std.string` (incl. `format`, shared natives) | §1.20-25 | Not started |
 | `std.regex` | §1.27-28 | Not started |
@@ -914,13 +933,86 @@ chose the whole-top-level rule (decision 10, now reworded).
 - **Docs.** `docs/LANGUAGE.md` §3 (the rule, with examples) and its error
   list.
 
-**Phase 4 — The string model.** Decisions 13-19:
-- the UTF-8 + ASCII-flag representation;
-- code-point indexing, negative indices and slices on strings;
-- immutability errors;
-- generator and spread iteration;
-- string ordering;
-- the `\u{...}`/`\x..` escapes and `r"..."` raw strings.
+**Phase 4 — The string model — done.** Decisions 13-19, and 40-44 (asked
+at the start of this phase).
+
+*Compiler.*
+- **Source decoding.** `Scanner.decodeSource` decodes strictly
+  (`UTF8Encoding(false, true)`), skips a byte-order mark, and turns a
+  decoding failure into a scan error with the line and column of the
+  first bad byte (decision 40). `Program.fs` reads module files as bytes
+  through it.
+- **Escapes.** `\u{...}` (1-6 hex digits, no surrogates, at most
+  `10FFFF`) and `\x..` (exactly 2 hex digits, at most `7F`), each with an
+  error that shows the right form. .NET strings are UTF-16, so a code
+  point above `FFFF` becomes a surrogate pair in the token and is written
+  to bytecode as proper UTF-8 by `Encoding.UTF8`.
+- **Raw strings.** The identifier scanner hands over to `scanRawString`
+  when the identifier is exactly `r` and a quote follows with no space
+  (decision 18). Raw strings may span lines (decision 41).
+- **Identifiers.** A non-ASCII character outside a string or comment gets
+  its own message: "non-ASCII characters may only appear in strings and
+  comments" (decision 19).
+- **Immutability.** `Resolver.fs` rejects `"abc"[0] = x` (also through
+  parentheses) with "Strings are immutable: a character can't be
+  assigned. Build a new string instead." (decision 13).
+- **Iteration.** The internal length node gained an `iterable` flag. A
+  comprehension generator compiles to a new `IterableLength` opcode
+  (`0x3F`; additive, so bytecode stays v4), which accepts strings. Cons
+  keeps `VectorLength`, which doesn't (decision 44).
+- **Folding.** String ordering is not constant-folded. .NET compares
+  UTF-16 code units, which disagree with code-point order above `FFFF`,
+  so it's left to the VM.
+
+*VM.*
+- **Representation.** `ObjString` keeps its UTF-8 `value` and adds
+  `length` in code points, counted once at creation. An all-ASCII string
+  indexes directly by byte. Any other string builds a code-point offset
+  table on its first index and keeps it. New `vm/src/utf8.hpp`/`.cpp`
+  hold the helpers, including a strict validator.
+- **Invariant.** Every `ObjString` is valid UTF-8. The loader rejects a
+  string constant that isn't, and indexing and slicing only cut at
+  code-point boundaries.
+- **Indexing and slicing.** `GetIndex` and `GetSlice` accept a string,
+  with vector rules and string-specific messages ("String index 3 out of
+  range for string of length 3."). `SetIndex` on a string is "Strings
+  are immutable...". The `Vm` keeps 128 pre-allocated one-character ASCII
+  strings as GC roots, so indexing or iterating an ASCII string allocates
+  nothing.
+- **Iteration.** `IterableLength` counts a string's code points.
+  `VectorExtend` spreads a string into characters, rooting its operands
+  with `TempRoot` while it allocates.
+- **Ordering.** `<`, `<=`, `>` and `>=` on two strings compare their UTF-8
+  bytes, which gives code-point order (decision 16). This happens in the
+  out-of-line slow path, so the integer fast paths are unchanged. A
+  string against a number is "Operands must be two numbers or two
+  strings."
+- **`length`** takes a string (decision 42).
+- **Knock-on effects.** `std.vector`'s Iqalox-source functions read
+  their argument with `length` and indexing, so `map`, `filter`, `reduce`
+  and `sort` now also accept a string and treat it as its characters.
+  This follows from decisions 14, 15 and 42 rather than being new
+  surface. `reverse`, `push` and `pop` stay vector-only.
+
+*Verification.*
+- **Tests.**
+  - xUnit: 399, up from 387. New cases cover both escapes and every
+    malformed form, raw strings (single and multi-line, quotes, the `r "x"`
+    call), non-ASCII identifiers, strict decoding with a BOM and the error
+    position, literal index-assignment, and `IterableLength` versus
+    `VectorLength`.
+  - Catch2: 151, up from 140. A new `test_strings.cpp` covers the UTF-8
+    validator (overlong, surrogate, out-of-range, truncated), code-point
+    length and offsets, indexing (including emoji and negatives),
+    immutability, slicing, ordering above `FFFF`, iteration, and spread
+    under GC stress. `test_bytecode.cpp` checks the loader rejects
+    invalid UTF-8.
+- **Sanitizers.** Clean under ASan/UBSan.
+- **Optimizer differential.** DIFFRESULT
+- **Examples.** A new `langspec/examples/strings.iqx`.
+- **Docs.** `docs/LANGUAGE.md` §2 (escapes, raw strings, UTF-8 source),
+  §3 (the string model) and §13 (`length`), the lexical grammar in
+  `README.md`, and `langspec/SYNTAX_GRAMMAR.md`.
 
 **Phase 5 — `std.math`.** Decisions 11 and 26, plus `0.3`-Phase-6-style
 import-gating, with "forgot an import" errors that name the module.

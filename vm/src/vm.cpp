@@ -20,12 +20,30 @@ std::string displayGlobalName(const std::string& qualified) {
 }
 
 constexpr size_t kMaxFrames = 1024;
+
+bool isString(const Value& v) { return isObj(v) && asObj(v)->type == ObjType::String; }
+
+// `<`, `<=`, `>`, `>=`: two numbers compare by exact value, two strings
+// lexicographically by code point (docs/PLAN-0.4.md decision 16). Byte
+// order of UTF-8 is code-point order, so comparing the bytes is enough.
+std::partial_ordering compareOrdered(const Value& a, const Value& b) {
+    if (isString(a) && isString(b)) {
+        return static_cast<ObjString*>(asObj(a))->value.compare(static_cast<ObjString*>(asObj(b))->value) <=> 0;
+    }
+    if (isString(a) || isString(b)) throw RuntimeError("Operands must be two numbers or two strings.");
+    return numeric::compare(a, b);
+}
 constexpr size_t kGcHeapGrowFactor = 2;
 
 
 }  // namespace
 
-Vm::Vm() { defineNatives(); }
+Vm::Vm() {
+    for (size_t c = 0; c < asciiCharacters.size(); ++c) {
+        asciiCharacters[c] = allocate<ObjString>(std::string(1, static_cast<char>(c)));
+    }
+    defineNatives();
+}
 
 void Vm::defineNatives() {
     // Every native is registered here under its bare name, but `compiler/`
@@ -128,7 +146,7 @@ void Vm::checkPropertyNotUndef(const Value& value, const std::string& propName) 
 
 size_t Vm::checkVectorIndex(const Value& receiver, const Value& indexValue) {
     if (!isObj(receiver) || asObj(receiver)->type != ObjType::Vector) {
-        runtimeError("Only vectors can be indexed, got " + typeName(receiver) + ".");
+        runtimeError("Only vectors and strings can be indexed, got " + typeName(receiver) + ".");
     }
     // docs/PLAN-0.4.md decision 9: only an integer indexes, even a whole
     // float like `1.0` is refused.
@@ -146,12 +164,34 @@ size_t Vm::checkVectorIndex(const Value& receiver, const Value& indexValue) {
     return static_cast<size_t>(resolved);
 }
 
-Value Vm::getSlice(const Value& receiver, const Value& startValue, const Value& stopValue) {
-    if (!isObj(receiver) || asObj(receiver)->type != ObjType::Vector) {
-        runtimeError("Only vectors can be sliced, got " + typeName(receiver) + ".");
+size_t Vm::checkStringIndex(ObjString* string, const Value& indexValue) {
+    numeric::Index index = numeric::toIndex(indexValue);
+    if (!index.isInteger) {
+        runtimeError("String index must be an integer, got " + typeName(indexValue) + ".");
     }
-    auto* vector = static_cast<ObjVector*>(asObj(receiver));
-    auto length = static_cast<int64_t>(vector->elements.size());
+    auto length = static_cast<int64_t>(string->length);
+    int64_t resolved = index.value < 0 ? index.value + length : index.value;
+    if (resolved < 0 || resolved >= length) {
+        runtimeError("String index " + stringify(indexValue) + " out of range for string of length " +
+                      std::to_string(string->length) + ".");
+    }
+    return static_cast<size_t>(resolved);
+}
+
+Value Vm::stringCharacter(ObjString* string, size_t index) {
+    std::string_view character = string->codePoints(index, index);
+    if (character.size() == 1) return objValue(asciiCharacters[static_cast<unsigned char>(character[0])]);
+    return objValue(allocate<ObjString>(std::string(character)));
+}
+
+Value Vm::getSlice(const Value& receiver, const Value& startValue, const Value& stopValue) {
+    bool isString = isObj(receiver) && asObj(receiver)->type == ObjType::String;
+    if (!isString && (!isObj(receiver) || asObj(receiver)->type != ObjType::Vector)) {
+        runtimeError("Only vectors and strings can be sliced, got " + typeName(receiver) + ".");
+    }
+    auto* vector = isString ? nullptr : static_cast<ObjVector*>(asObj(receiver));
+    auto* string = isString ? static_cast<ObjString*>(asObj(receiver)) : nullptr;
+    auto length = static_cast<int64_t>(isString ? string->length : vector->elements.size());
 
     auto resolveBound = [&](const Value& boundValue, int64_t defaultValue, const char* label) {
         if (isNil(boundValue)) return defaultValue;
@@ -168,6 +208,11 @@ Value Vm::getSlice(const Value& receiver, const Value& startValue, const Value& 
     int64_t start = std::clamp(resolveBound(startValue, 0, "start"), int64_t{0}, length);
     int64_t stop = std::clamp(resolveBound(stopValue, length - 1, "stop"), int64_t{-1}, length - 1);
 
+    if (isString) {
+        // docs/PLAN-0.4.md decision 14: a slice of a string is a new string.
+        if (start > stop) return objValue(allocate<ObjString>(std::string()));
+        return objValue(allocate<ObjString>(std::string(string->codePoints(static_cast<size_t>(start), static_cast<size_t>(stop)))));
+    }
     auto* result = allocate<ObjVector>();
     if (start <= stop) {
         auto startIt = vector->elements.begin() + static_cast<std::ptrdiff_t>(start);
@@ -196,10 +241,10 @@ void Vm::numericSlowPath(bytecode::OpCode op, const Value& a, const Value& b) {
             case OpCode::BitNot: result = numeric::bitNot(*this, a); break;
             case OpCode::ShiftLeft: result = numeric::shiftLeft(*this, a, b); break;
             case OpCode::ShiftRight: result = numeric::shiftRight(*this, a, b); break;
-            case OpCode::Greater: result = boolValue(numeric::compare(a, b) > 0); break;
-            case OpCode::GreaterEqual: result = boolValue(numeric::compare(a, b) >= 0); break;
-            case OpCode::Less: result = boolValue(numeric::compare(a, b) < 0); break;
-            case OpCode::LessEqual: result = boolValue(numeric::compare(a, b) <= 0); break;
+            case OpCode::Greater: result = boolValue(compareOrdered(a, b) > 0); break;
+            case OpCode::GreaterEqual: result = boolValue(compareOrdered(a, b) >= 0); break;
+            case OpCode::Less: result = boolValue(compareOrdered(a, b) < 0); break;
+            case OpCode::LessEqual: result = boolValue(compareOrdered(a, b) <= 0); break;
             default: throw std::logic_error("numericSlowPath: not a numeric opcode");
         }
     } catch (const RuntimeError& error) {
@@ -930,6 +975,11 @@ void Vm::run() {
             case OpCode::GetIndex: {
                 Value indexValue = pop();
                 Value receiver = pop();
+                if (isString(receiver)) {
+                    auto* string = static_cast<ObjString*>(asObj(receiver));
+                    push(stringCharacter(string, checkStringIndex(string, indexValue)));
+                    break;
+                }
                 size_t index = checkVectorIndex(receiver, indexValue);
                 push(static_cast<ObjVector*>(asObj(receiver))->elements[index]);
                 break;
@@ -938,6 +988,10 @@ void Vm::run() {
                 Value value = pop();
                 Value indexValue = pop();
                 Value receiver = pop();
+                if (isString(receiver)) {
+                    // docs/PLAN-0.4.md decision 13.
+                    runtimeError("Strings are immutable: a character can't be assigned. Build a new string instead.");
+                }
                 size_t index = checkVectorIndex(receiver, indexValue);
                 static_cast<ObjVector*>(asObj(receiver))->elements[index] = value;
                 push(value);
@@ -953,9 +1007,23 @@ void Vm::run() {
             case OpCode::VectorLength: {
                 Value receiver = pop();
                 if (!isObj(receiver) || asObj(receiver)->type != ObjType::Vector) {
-                    runtimeError("Only vectors have a length, got " + typeName(receiver) + ".");
+                    // Only cons emits this (docs/PLAN-0.4.md decision 44).
+                    runtimeError("The tail of [x | tail] must be a vector, got " + typeName(receiver) + ".");
                 }
                 push(smallIntValue(static_cast<int64_t>(static_cast<ObjVector*>(asObj(receiver))->elements.size())));
+                break;
+            }
+            case OpCode::IterableLength: {
+                // A list-comprehension generator (docs/PLAN-0.4.md decision
+                // 15): a string iterates over its characters.
+                Value receiver = pop();
+                if (isString(receiver)) {
+                    push(smallIntValue(static_cast<int64_t>(static_cast<ObjString*>(asObj(receiver))->length)));
+                } else if (isObj(receiver) && asObj(receiver)->type == ObjType::Vector) {
+                    push(smallIntValue(static_cast<int64_t>(static_cast<ObjVector*>(asObj(receiver))->elements.size())));
+                } else {
+                    runtimeError("A comprehension can only iterate over a vector or a string, got " + typeName(receiver) + ".");
+                }
                 break;
             }
             case OpCode::VectorAppend: {
@@ -985,8 +1053,22 @@ void Vm::run() {
                 // re-fetch it from in between.
                 Value source = pop();
                 Value target = pop();
+                if (isString(source)) {
+                    // docs/PLAN-0.4.md decision 15: `[..."abc"]` splits into
+                    // characters. `target` is on no root while this
+                    // allocates, so hold it (and `source`) first.
+                    TempRoot keepTarget(*this, target);
+                    TempRoot keepSource(*this, source);
+                    auto* string = static_cast<ObjString*>(asObj(source));
+                    for (size_t i = 0; i < string->length; ++i) {
+                        Value character = stringCharacter(string, i);
+                        static_cast<ObjVector*>(asObj(target))->elements.push_back(character);
+                    }
+                    push(target);
+                    break;
+                }
                 if (!isObj(source) || asObj(source)->type != ObjType::Vector) {
-                    runtimeError("Can only spread a vector, got " + typeName(source) + ".");
+                    runtimeError("Can only spread a vector or a string, got " + typeName(source) + ".");
                 }
                 auto& targetElements = static_cast<ObjVector*>(asObj(target))->elements;
                 auto& sourceElements = static_cast<ObjVector*>(asObj(source))->elements;
@@ -1014,6 +1096,7 @@ void Vm::markRoots() {
     for (const Value& value : stack) markValue(value);
     for (auto& [name, value] : globals) markValue(value);
     for (const Value& value : tempRoots) markValue(value);
+    for (ObjString* character : asciiCharacters) markObject(character);
     for (ObjUpvalue* upvalue = openUpvalues; upvalue != nullptr; upvalue = upvalue->nextOpen) markObject(upvalue);
     // Every `frames[i].closure` is also sitting on `stack` at its own call
     // site (see `call`'s calling convention note in vm.hpp), so the stack

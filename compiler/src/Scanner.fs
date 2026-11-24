@@ -177,6 +177,10 @@ type private ScannerState(source: string) =
         while not (isAtEnd ()) && not (isRecognized (peek ())) do
             advance () |> ignore
         let lexeme = currentLexeme ()
+        if lexeme |> Seq.exists (fun c -> int c > 0x7F) then
+            // Decision 19: identifiers stay ASCII.
+            addError $"Unexpected character(s): {lexeme} (non-ASCII characters may only appear in strings and comments)." startLine startColumn
+        else
         let suffix = if lexeme.Length > 1 then "s" else ""
         addError $"Unexpected character{suffix}: {lexeme}" startLine startColumn
 
@@ -208,6 +212,65 @@ type private ScannerState(source: string) =
         if not closed then
             addError "Unterminated block comment." startLine startColumn
 
+    let isHexDigit (c: char) = isDigit c || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+
+    /// `\u{...}` (`docs/PLAN-0.4.md` decision 17), with `current` just past
+    /// the `u`: 1-6 hex digits in braces naming any code point except a
+    /// surrogate. Consumes through the closing brace when there is one.
+    let scanUnicodeEscape () : Result<int, string> =
+        let usage = "A \\u escape takes 1-6 hex digits in braces, like \\u{1F600}."
+        if peek () <> '{' then
+            Error usage
+        else
+            advance () |> ignore
+            let digitsStart = current
+            while isHexDigit (peek ()) do
+                advance () |> ignore
+            let digits = source.Substring(digitsStart, current - digitsStart)
+            if peek () <> '}' || digits.Length = 0 || digits.Length > 6 then
+                Error usage
+            else
+                advance () |> ignore
+                let codePoint = System.Convert.ToInt32(digits, 16)
+                if codePoint >= 0xD800 && codePoint <= 0xDFFF then
+                    Error $"\\u{{{digits}}} is a surrogate, not a character."
+                elif codePoint > 0x10FFFF then
+                    Error $"\\u{{{digits}}} is above the largest code point, 10FFFF."
+                else
+                    Ok codePoint
+
+    /// `\x..` (decision 17), with `current` just past the `x`: exactly two
+    /// hex digits, at most 7F, so it always names one ASCII character.
+    let scanHexEscape () : Result<char, string> =
+        let usage = "A \\x escape takes exactly 2 hex digits up to 7F, like \\x41; use \\u{...} beyond ASCII."
+        if isHexDigit (peek ()) && isHexDigit (peekNext ()) then
+            let digits = source.Substring(current, 2)
+            advance () |> ignore
+            advance () |> ignore
+            let value = System.Convert.ToInt32(digits, 16)
+            if value > 0x7F then Error usage else Ok(char value)
+        else
+            Error usage
+
+    /// `r"..."` / `r'...'` (decision 18), with `current` just past the opening
+    /// quote: no escapes, so the string ends at the first matching quote.
+    /// It may span lines, like an ordinary string (decision 41).
+    let scanRawString (quote: char) =
+        let value = StringBuilder()
+        let mutable finished = false
+        while not finished do
+            if isAtEnd () then
+                addError "Unterminated string." startLine startColumn
+                finished <- true
+            elif peek () = quote then
+                advance () |> ignore
+                finished <- true
+                addToken String (StringLiteral(value.ToString()))
+            else
+                let c = advance ()
+                value.Append(c) |> ignore
+                if c = '\n' then advanceNewline ()
+
     let scanString (quote: char) =
         let value = StringBuilder()
         let mutable finished = false
@@ -233,12 +296,21 @@ type private ScannerState(source: string) =
                     finished <- true
                 else
                     let escapeChar = advance ()
+                    let fail (message: string) =
+                        if not hadError then
+                            addError message line backslashColumn
+                        hadError <- true
                     match Map.tryFind escapeChar escapeSequences with
                     | Some resolved -> value.Append(resolved) |> ignore
-                    | None ->
-                        if not hadError then
-                            addError $"Unrecognized escape sequence: \\{escapeChar}" line backslashColumn
-                        hadError <- true
+                    | None when escapeChar = 'u' ->
+                        match scanUnicodeEscape () with
+                        | Ok codePoint -> value.Append(System.Char.ConvertFromUtf32 codePoint) |> ignore
+                        | Error message -> fail message
+                    | None when escapeChar = 'x' ->
+                        match scanHexEscape () with
+                        | Ok c -> value.Append(c) |> ignore
+                        | Error message -> fail message
+                    | None -> fail $"Unrecognized escape sequence: \\{escapeChar}"
             elif peek () = '\n' then
                 value.Append('\n') |> ignore
                 advance () |> ignore
@@ -382,6 +454,11 @@ type private ScannerState(source: string) =
         while isAlphaNumeric (peek ()) do
             advance () |> ignore
         let text = currentLexeme ()
+        // `r"x"` is a raw string, but `r "x"` calls a function named `r`
+        // (decision 18): only a quote right after the `r` starts one.
+        if text = "r" && (peek () = '"' || peek () = '\'') then
+            scanRawString (advance ())
+        else
         match Map.tryFind text keywords with
         | Some tokenType -> addToken tokenType NoLiteral
         | None -> addToken Identifier NoLiteral
@@ -443,3 +520,21 @@ type private ScannerState(source: string) =
 /// an exception-per-error design).
 let scanTokens (source: string) : Token list * ScanError list =
     ScannerState(source).ScanTokens()
+
+/// Decodes a source file's bytes (`docs/PLAN-0.4.md` decisions 19 and 40):
+/// strict UTF-8, with a leading byte-order mark skipped. Bytes that aren't
+/// valid UTF-8 are a scan error on the line they appear on, never silently
+/// replaced.
+let decodeSource (bytes: byte[]) : Result<string, ScanError> =
+    let offset = if bytes.Length >= 3 && bytes.[0] = 0xEFuy && bytes.[1] = 0xBBuy && bytes.[2] = 0xBFuy then 3 else 0
+    try
+        Ok(UTF8Encoding(false, true).GetString(bytes, offset, bytes.Length - offset))
+    with :? DecoderFallbackException as e ->
+        let bad = offset + max 0 e.Index
+        let mutable line = 1
+        let mutable lineStart = 0
+        for i in 0 .. bad - 1 do
+            if bytes.[i] = byte '\n' then
+                line <- line + 1
+                lineStart <- i + 1
+        Error { Message = "Source file is not valid UTF-8."; Line = line; Column = bad - lineStart + 1 }

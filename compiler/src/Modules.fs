@@ -162,7 +162,7 @@ let rec private qualifyExpr (m: string) (own: Set<string>) (expr: BoundExpr) : B
     | BIndexSet(obj, index, value, bracket) -> BIndexSet(q obj, q index, q value, bracket)
     | BSlice(obj, start, stop, bracket) -> BSlice(q obj, qo start, qo stop, bracket)
     | BLambda decl -> BLambda(qualifyFunction m own decl)
-    | BVectorLengthInternal v -> BVectorLengthInternal(q v)
+    | BVectorLengthInternal(v, i) -> BVectorLengthInternal(q v, i)
     | BVectorAppendInternal(v, value) -> BVectorAppendInternal(q v, q value)
     | BSelf(binding, keyword) -> BSelf(qualifyBinding m own binding, keyword)
     | BSuper(selfBinding, binding, keyword, method) ->

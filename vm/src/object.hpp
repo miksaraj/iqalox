@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "numeric.hpp"
+#include "utf8.hpp"
 #include "value.hpp"
 
 namespace iqalox {
@@ -41,9 +42,42 @@ struct Obj {
     virtual ~Obj() = default;
 };
 
+// An immutable sequence of code points (docs/PLAN-0.4.md decisions 13-14),
+// stored as valid UTF-8. Indexing is by code point: O(1) for an all-ASCII
+// string, and through a code-point offset table built on first use
+// otherwise.
 struct ObjString : Obj {
     std::string value;
-    explicit ObjString(std::string v) : Obj(ObjType::String), value(std::move(v)) {}
+    size_t length;  // in code points
+
+    explicit ObjString(std::string v)
+        : Obj(ObjType::String), value(std::move(v)), length(utf8::countCodePoints(value)) {}
+
+    bool isAscii() const { return length == value.size(); }
+
+    // The byte offset where code point `index` starts, for 0 <= index <=
+    // length (`length` gives the end of the string).
+    size_t byteOffset(size_t index) const {
+        if (isAscii() || index == length) return index == length ? value.size() : index;
+        if (offsets_.empty()) {
+            offsets_.reserve(length);
+            for (size_t i = 0; i < value.size(); ++i) {
+                if (!utf8::isContinuation(static_cast<unsigned char>(value[i]))) {
+                    offsets_.push_back(static_cast<uint32_t>(i));
+                }
+            }
+        }
+        return offsets_[index];
+    }
+
+    // Bytes of the code points `start` through `stop`, both inclusive.
+    std::string_view codePoints(size_t start, size_t stop) const {
+        size_t from = byteOffset(start);
+        return std::string_view(value).substr(from, byteOffset(stop + 1) - from);
+    }
+
+private:
+    mutable std::vector<uint32_t> offsets_;
 };
 
 // An exact integer outside the int64 range (docs/PLAN-0.4.md Phase 1).

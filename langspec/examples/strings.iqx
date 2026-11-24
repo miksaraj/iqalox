@@ -1,0 +1,42 @@
+<#
+    The string model (0.4, docs/PLAN-0.4.md decisions 13-19, Phase 4).
+
+    Strings are immutable sequences of Unicode code points.
+    `s[i]` is a one-character string, `length` counts code points,
+    and slices, negative indices, comprehensions and spread all work
+    the same way they do on vectors.
+#>
+import std.vector.length
+import std.vector.sort
+
+var greeting = "héllo, wörld 😀"
+print (length greeting)
+print greeting[0]
+print greeting[1]
+print greeting[-1]
+print greeting[7:11]
+print greeting[:4]
+
+# Iterating: a comprehension over a string sees each character,
+# and spread splits one into characters.
+print [c | c <- "añb"]
+print [..."a😀c"]
+var vowels = [c | c <- "programming" | c == "a" or c == "i" or c == "o"]
+print vowels
+
+# Strings compare by code point, independent of locale.
+print ("Z" < "a")
+print ("ab" < "abc")
+print (sort (a, b) -> a < b, ["pear", "apple", "zoo", "Apple"])
+
+# Escapes: \u{...} names any code point, \x.. an ASCII one.
+print "\u{48}\u{49} \u{1F600} \x41\x42"
+
+# A raw string keeps every backslash, which suits regex patterns.
+print r"\d+\.\d+"
+
+# Strings are immutable: `greeting[0] = "H"` is a runtime error, and
+# assigning into a literal doesn't even compile. Build a new string
+# instead.
+import std.vector.concat
+print (concat ["H", greeting[1:]])

@@ -192,6 +192,15 @@ own top-level grammar grew from `0.1`'s.
   tail, where `|` keeps marking cons and comprehensions. Parentheses give
   `bitOr` back (`[(a | b), c]`), and so do index and slice brackets
   (`v[i | 1]`). `[x, a | b]` is a parse error that says so.
+* **String literals gain escapes and a raw form** (`docs/PLAN-0.4.md`
+  decisions 17-18, Phase 4). Purely lexical, like number literals: the
+  `STRING` token in `primary` is unchanged.
+  - `\u{...}` takes 1-6 hex digits and names any code point but a
+    surrogate; `\x..` takes exactly two hex digits up to `7F`.
+  - `r"..."` and `r'...'` are raw: no escapes, and they may span lines.
+    The `r` must touch the quote; `r "x"` is still a call to `r`, the same
+    whitespace rule as `v[i]` versus `f [i]`.
+  - Source files are UTF-8, and identifiers stay ASCII (decision 19).
 
 ##
     program         → declaration* EOF ;
