@@ -7,6 +7,7 @@ add_executable(iqaloxvm_tests
     test_classes.cpp
     test_dependencies.cpp
     test_numeric.cpp
+    test_strings.cpp
 )
 
 target_link_libraries(iqaloxvm_tests PRIVATE iqaloxvm_core Catch2::Catch2WithMain)

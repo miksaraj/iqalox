@@ -31,7 +31,10 @@ let private parseModule (entryFull: string) (moduleName: string) (path: string) 
     else
         let label line =
             if IO.Path.GetFullPath path = entryFull then $"[line {line}]" else $"[{moduleName}, line {line}]"
-        let tokens, scanErrors = scanTokens (IO.File.ReadAllText path)
+        match decodeSource (IO.File.ReadAllBytes path) with
+        | Error e -> Error [ $"{label e.Line} Error: {e.Message}" ]
+        | Ok source ->
+        let tokens, scanErrors = scanTokens source
 
         if not scanErrors.IsEmpty then
             Error [ for e in scanErrors -> $"{label e.Line} Error: {e.Message}" ]

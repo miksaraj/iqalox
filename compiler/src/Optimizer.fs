@@ -60,7 +60,7 @@ let rec private mapExpr (h: Hooks) (e: BoundExpr) : BoundExpr =
         | BIndexSet(o, i, v, t) -> BIndexSet(m o, m i, m v, t)
         | BSlice(o, a, b, t) -> BSlice(m o, Option.map m a, Option.map m b, t)
         | BLambda d -> BLambda(mapDecl h d)
-        | BVectorLengthInternal v -> BVectorLengthInternal(m v)
+        | BVectorLengthInternal(v, i) -> BVectorLengthInternal(m v, i)
         | BVectorAppendInternal(v, x) -> BVectorAppendInternal(m v, m x)
         | BLiteral _
         | BVariable _

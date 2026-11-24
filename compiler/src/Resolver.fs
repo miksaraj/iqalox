@@ -1164,6 +1164,16 @@ type private Resolver
             BSet(this.ResolveExpr obj, name, this.ResolveExpr value)
         | Index(obj, index, bracket) -> BIndex(this.ResolveExpr obj, this.ResolveExpr index, bracket)
         | IndexSet(obj, index, value, bracket) ->
+            // docs/PLAN-0.4.md decision 13: strings are immutable. A target
+            // that is visibly a string literal is caught here; any other
+            // string target is a runtime error in the VM.
+            let rec isStringLiteral (e: Expr) =
+                match e with
+                | Literal(StringValue _) -> true
+                | Grouping inner -> isStringLiteral inner
+                | _ -> false
+            if isStringLiteral obj then
+                error bracket "Strings are immutable: a character can't be assigned. Build a new string instead."
             BIndexSet(this.ResolveExpr obj, this.ResolveExpr index, this.ResolveExpr value, bracket)
         | Slice(obj, start, stop, bracket) ->
             BSlice(this.ResolveExpr obj, start |> Option.map this.ResolveExpr, stop |> Option.map this.ResolveExpr, bracket)
@@ -1218,7 +1228,7 @@ type private Resolver
                       VarStmt(indexName, Some(Literal(IntValue 0I)), true)
                       ForStmt(
                           None,
-                          Some(Binary(Variable indexName, lessOp, InternalVectorLength(Variable listParam))),
+                          Some(Binary(Variable indexName, lessOp, InternalVectorLength(Variable listParam, false))),
                           Some(Unary(incrOp, Variable indexName)),
                           ExpressionStmt(
                               InternalVectorAppend(Variable resultName, Index(Variable listParam, Variable indexName, bracket))
@@ -1278,7 +1288,7 @@ type private Resolver
                       VarStmt(indexN, Some(Literal(IntValue 0I)), true)
                       ForStmt(
                           None,
-                          Some(Binary(Variable indexN, lessOp, InternalVectorLength(Variable sourceName))),
+                          Some(Binary(Variable indexN, lessOp, InternalVectorLength(Variable sourceName, true))),
                           Some(Unary(incrOp, Variable indexN)),
                           Block(
                               VarStmt(variable, Some(Index(Variable sourceName, Variable indexN, bracket)), false)
@@ -1295,7 +1305,7 @@ type private Resolver
                       VarStmt(indexName, Some(Literal(IntValue 0I)), true)
                       ForStmt(
                           None,
-                          Some(Binary(Variable indexName, lessOp, InternalVectorLength(Variable sourceParam))),
+                          Some(Binary(Variable indexName, lessOp, InternalVectorLength(Variable sourceParam, true))),
                           Some(Unary(incrOp, Variable indexName)),
                           Block(
                               VarStmt(firstVariable, Some(Index(Variable sourceParam, Variable indexName, bracket)), false)
@@ -1308,7 +1318,7 @@ type private Resolver
             let _, firstSource = generators.Head
             let boundSource = this.ResolveExpr firstSource
             BCall(BLambda boundDecl, [ boundSource ])
-        | InternalVectorLength vector -> BVectorLengthInternal(this.ResolveExpr vector)
+        | InternalVectorLength(vector, iterable) -> BVectorLengthInternal(this.ResolveExpr vector, iterable)
         | InternalVectorAppend(vector, value) -> BVectorAppendInternal(this.ResolveExpr vector, this.ResolveExpr value)
         | SelfExpr keyword ->
             match resolveReference "self" true with

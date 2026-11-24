@@ -536,7 +536,7 @@ let ``a guard clause wraps the append in a conditional, same jump shape as an or
                Constant 0
                GetLocal 2
                GetLocal 0
-               VectorLength
+               IterableLength
                Less
                JumpIfFalse 31
                Pop
@@ -588,7 +588,7 @@ let ``two generators compile to nested loops, the second's source re-evaluated i
                Constant 0
                GetLocal 2
                GetLocal 0
-               VectorLength
+               IterableLength
                Less
                JumpIfFalse 44
                Pop
@@ -599,7 +599,7 @@ let ``two generators compile to nested loops, the second's source re-evaluated i
                Constant 0
                GetLocal 5
                GetLocal 4
-               VectorLength
+               IterableLength
                Less
                JumpIfFalse 36
                Pop
@@ -689,3 +689,18 @@ let ``integer division and bitwise operators compile to their own opcodes`` () =
     Assert.Contains(BitNot, opcodes "~a")
     Assert.Contains(ShiftLeft, opcodes "a << b")
     Assert.Contains(ShiftRight, opcodes "a >> b")
+
+[<Fact>]
+let ``a comprehension generator uses IterableLength, cons keeps VectorLength`` () =
+    let opcodesOf (source: string) =
+        let chunk = compileSource source
+        chunk.Constants
+        |> Array.collect (function
+            | FunctionConstant proto -> proto.Chunk.Code
+            | _ -> [||])
+    let comprehension = opcodesOf "var r = [c | c <- \"ab\"]"
+    Assert.Contains(IterableLength, comprehension)
+    Assert.DoesNotContain(VectorLength, comprehension)
+    let cons = opcodesOf "var r = [1 | [2]]"
+    Assert.Contains(VectorLength, cons)
+    Assert.DoesNotContain(IterableLength, cons)

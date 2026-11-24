@@ -87,7 +87,7 @@ type BoundExpr =
     /// evaluates to `Nil` (the opcode itself pushes nothing back) purely
     /// so it satisfies the "every expression pushes one value" contract
     /// when used as a bare `ExpressionStmt`.
-    | BVectorLengthInternal of vector: BoundExpr
+    | BVectorLengthInternal of vector: BoundExpr * iterable: bool
     | BVectorAppendInternal of vector: BoundExpr * value: BoundExpr
     | BSelf of binding: VariableBinding * keyword: Token
     | BSuper of selfBinding: VariableBinding * binding: VariableBinding * keyword: Token * method: Token

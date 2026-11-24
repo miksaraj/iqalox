@@ -230,7 +230,13 @@ FLOAT       → DIGITS "." DIGITS? EXPONENT?
             | DIGITS EXPONENT
 EXPONENT    → ( "e" | "E" ) ( "+" | "-" )? DIGITS
 DIGITS      → DIGIT ( DIGIT | "_" )*
-STRING      → '"' <any char except '"'>* '"' | "'" <any char except "'">* "'"
+STRING      → '"' ( <any char except '"' or '\'> | ESCAPE )* '"'
+            | "'" ( <any char except "'" or '\'> | ESCAPE )* "'"
+            | "r" '"' <any char except '"'>* '"'
+            | "r" "'" <any char except "'">* "'"
+ESCAPE      → '\' ( 'n' | 't' | 'r' | '\' | "'" | '"' | '0' )
+            | '\x' HEXDIGIT HEXDIGIT
+            | '\u{' HEXDIGIT{1,6} '}'
 IDENTIFIER  → ALPHA ( ALPHA | DIGIT )*
 ALPHA       → 'a'...'z' | 'A'...'Z' | '_'
 DIGIT       → '0'...'9'
@@ -257,10 +263,25 @@ DIGIT       → '0'...'9'
     print exactly (`5`), floats always with a decimal point (`5.0`,
     `1.0e+16`). The same holds inside a printed vector: `print [1, 2.0,
     "a"]` prints `[1, 2.0, a]` (strings unquoted).
-- **Strings** may use single or double quotes interchangeably. Escape
-  sequences are processed inside string literals — `\n` `\t` `\r` `\\`
-  `\'` `\"` `\0` are recognized; any other character after a backslash is
-  a compile-time scan error.
+- **Strings** may use single or double quotes interchangeably, and may
+  span lines. Escape sequences are processed inside string literals —
+  `\n` `\t` `\r` `\\` `\'` `\"` `\0` are recognized, plus (new for
+  `0.4`):
+  - `\u{...}`: 1-6 hex digits naming any code point, `\u{1F600}` is 😀.
+    A surrogate (`\u{D800}`) or a value above `\u{10FFFF}` is an error.
+  - `\x..`: exactly two hex digits up to `7F`, so always one ASCII
+    character (`\x41` is `A`).
+
+  Any other character after a backslash is a compile-time scan error.
+- **Raw strings** (new for `0.4`): `r"..."` or `r'...'` keeps every
+  backslash and processes no escapes, which suits regex patterns:
+  `r"\d+\.\d+"`. A raw string can't contain its own quote character, but
+  may span lines. The `r` must touch the quote: `r "x"` is a call to a
+  function named `r`, the same whitespace rule as `v[i]` versus `f [i]`.
+- **Source files are UTF-8** (new for `0.4`). A file that isn't valid
+  UTF-8 is a compile-time error naming the line; a leading byte-order mark
+  is skipped. Non-ASCII characters may appear only in strings and
+  comments: identifiers stay ASCII.
 - **Comments**: `# ...` runs to end of line; `<# ... #>` is a block
   comment and may span multiple lines. Neither nests.
 - **Implicit semicolons**: a newline is scanned as a statement
@@ -319,9 +340,9 @@ print (nil ? "truthy" : "falsy")   # falsy
 comparing a number to a string, for instance, is a well-defined `false`,
 not an error. **Ordering** comparisons (`>`, `>=`, `<`, `<=`) and
 **arithmetic** (`+`, `-`, `*`, `/`, `%`, `^`) require both operands to be
-numbers and raise a runtime error otherwise — there is no string
-comparison or string `+` concatenation (use `concat`,
-[§13](#13-the-standard-library)).
+numbers and raise a runtime error otherwise. The one exception (new for
+`0.4`) is that two strings can be ordered (see below). There is no string
+`+` concatenation (use `concat`, [§13](#13-the-standard-library)).
 
 **Integers and floats (new for `0.4`, `docs/PLAN-0.4.md` decisions 1-9).**
 
@@ -416,6 +437,30 @@ comparison or string `+` concatenation (use `concat`,
   and a float zero never errors. A constant `0.0` divisor is a
   compile-time warning, "Division by a constant 0.0 always gives inf or
   nan."
+
+**Strings (new for `0.4`, `docs/PLAN-0.4.md` decisions 13-19 and 40-44).**
+
+- **A string is an immutable sequence of Unicode code points.** `s[i]`
+  is a one-character string, and `length s` counts code points:
+  `length "héllo 😀" == 7`.
+- **Strings index and slice exactly like vectors**
+  ([§9](#9-vectors-indexing-cons-comprehensions-and-spread)): `s[-1]` is
+  the last character, `s[1:3]` is an end-inclusive slice returning a new
+  string, and slice bounds clamp. An out-of-range `s[i]` or a non-integer
+  index is a runtime error.
+- **Strings are immutable.** `s[0] = "x"` is a runtime error, and a
+  compile-time one when the target is a string literal. Build a new
+  string instead, e.g. `concat ["H", s[1:]]`.
+- **Strings are iterable.** A comprehension generator walks the
+  characters (`[c | c <- "abc"]`), and spread splits a string into them
+  (`[..."abc"] == ["a", "b", "c"]`). Cons is not: `[x | "bc"]` is a
+  runtime error; write `[x, ..."bc"]`.
+- **Strings order by code point**, independent of locale: `"Z" < "a"`,
+  `"ab" < "abc"`. Ordering a string against a number is a runtime error,
+  while `==` between them is just `false`.
+- **No normalization.** Equality and ordering compare code points as
+  written, so a precomposed `"\u{E9}"` (é) and `"e\u{301}"` (e plus a
+  combining accent) are different strings with different lengths.
 
 **New for `0.2`**: vectors are no longer literals-only data. `[1, 2, 3]`
 still produces a value the same way it always has, but that value now
@@ -1227,7 +1272,8 @@ storage and never call back into user code:
   Returns `nil`.
 - **`pop vector`** — removes and returns the last element of `vector`
   **in place**. A runtime error on an empty vector.
-- **`length vector`** — returns the element count as an integer.
+- **`length vector`** — returns the element count as an integer. New for
+  `0.4`: it also takes a string and returns its length in code points.
 - **`reverse vector`** — returns a **new** vector with elements in
   reverse order; does not mutate the original.
 - **`concat vector`** — stringifies every element of `vector` and joins

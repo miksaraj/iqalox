@@ -2,6 +2,7 @@
 
 #include <compare>
 #include <cstdint>
+#include <array>
 #include <deque>
 #include <stdexcept>
 #include <string>
@@ -174,6 +175,10 @@ private:
     std::unordered_map<std::string, Value> globals;
     ObjUpvalue* openUpvalues = nullptr;
     std::vector<Value> tempRoots;  // see TempRoot
+    // One-character strings for every ASCII code point, so indexing and
+    // iterating an ASCII string allocate nothing (docs/PLAN-0.4.md Phase
+    // 4). Allocated by the constructor and kept alive as GC roots.
+    std::array<ObjString*, 128> asciiCharacters{};
 
     Obj* objects = nullptr;
     size_t bytesAllocated = 0;
@@ -220,6 +225,11 @@ private:
     // `GetProperty`/`SetProperty` already do) when out of range either
     // direction.
     size_t checkVectorIndex(const Value& receiver, const Value& indexValue);
+    // The same rules for a string, by code point (docs/PLAN-0.4.md
+    // decision 14).
+    size_t checkStringIndex(ObjString* string, const Value& indexValue);
+    // Code point `index` of `string` as a one-character string.
+    Value stringCharacter(ObjString* string, size_t index);
     // `docs/PLAN-0.3.md` decision 3: `v[a:b]`, end-inclusive. `startValue`/
     // `stopValue` are `nil` for an omitted bound (defaulting to 0/
     // length-1 respectively); negative bounds translate the same way

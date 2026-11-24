@@ -201,6 +201,18 @@ TEST_CASE("a truncated file is rejected rather than reading out of bounds", "[by
     REQUIRE_THROWS_AS(bytecode::load(file.path, vm), std::runtime_error);
 }
 
+TEST_CASE("a string constant that isn't valid UTF-8 is rejected", "[bytecode]") {
+    // docs/PLAN-0.4.md Phase 4: every ObjString holds valid UTF-8.
+    auto bytes = header();
+    pushU32(bytes, 1);
+    bytes.push_back(0x01);
+    pushString(bytes, "\xE4");  // Latin-1 'a-umlaut'
+    TempFile file(bytes);
+
+    Vm vm;
+    REQUIRE_THROWS_AS(bytecode::load(file.path, vm), std::runtime_error);
+}
+
 TEST_CASE("an unknown constant tag is rejected", "[bytecode]") {
     auto bytes = header();
     pushU32(bytes, 1);

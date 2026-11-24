@@ -117,7 +117,9 @@ Chunk readChunk(Reader& reader, Vm& vm) {
             }
             case kStringTag: {
                 uint32_t length = reader.readU32();
-                auto* str = vm.allocate<ObjString>(reader.readString(length));
+                std::string text = reader.readString(length);
+                if (!utf8::isValid(text)) throw std::runtime_error("iqalox bytecode: string constant is not valid UTF-8");
+                auto* str = vm.allocate<ObjString>(std::move(text));
                 chunk.constants.push_back(objValue(str));
                 break;
             }

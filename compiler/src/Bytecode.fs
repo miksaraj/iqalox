@@ -239,6 +239,10 @@ type Instruction =
     | BitNot
     | ShiftLeft
     | ShiftRight
+    /// Like `VectorLength`, but a string gives its length in code points.
+    /// Emitted only for list-comprehension generators (`docs/PLAN-0.4.md`
+    /// decision 15), so cons still rejects a string tail (decision 44).
+    | IterableLength
 
 type Constant =
     /// An exact integer of any size; `write` picks the 64-bit or the big
@@ -332,6 +336,7 @@ let private opcodeOf =
     | BitNot -> 0x3Cuy
     | ShiftLeft -> 0x3Duy
     | ShiftRight -> 0x3Euy
+    | IterableLength -> 0x3Fuy
 
 /// Serialized byte length of one instruction -- see the module doc
 /// comment's "Instruction encoding" table.
@@ -355,6 +360,7 @@ let instructionByteLength (instruction: Instruction) : int =
     | BitNot
     | ShiftLeft
     | ShiftRight
+    | IterableLength
     | Negate
     | Not
     | Equal
@@ -452,6 +458,7 @@ let rec private writeChunk (writer: BinaryWriter) (chunk: Chunk) : unit =
         | BitNot
         | ShiftLeft
         | ShiftRight
+        | IterableLength
         | Negate
         | Not
         | Equal

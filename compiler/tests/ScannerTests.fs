@@ -329,3 +329,77 @@ let ``longest match keeps the existing two-character operators intact`` () =
     Assert.Equal<TokenType list>([ Identifier; LeftArrow; Identifier; Eof ], tokenTypes "x <- xs")
     Assert.Equal<TokenType list>([ Identifier; LessEqual; Identifier; Eof ], tokenTypes "a <= b")
     Assert.Equal<TokenType list>([ Identifier; Slash; Identifier; Eof ], tokenTypes "a / b")
+
+// --- docs/PLAN-0.4.md Phase 4: escapes, raw strings, source encoding ---
+
+let private stringLiteral (source: string) =
+    let tokens, errors = scanTokens source
+    Assert.Empty errors
+    tokens.[0].Literal
+
+[<Fact>]
+let ``unicode escapes take 1-6 hex digits in braces and cover every code point`` () =
+    Assert.Equal(StringLiteral "A", stringLiteral "\"\\u{41}\"")
+    Assert.Equal(StringLiteral "é", stringLiteral "\"\\u{e9}\"")
+    Assert.Equal(StringLiteral "😀", stringLiteral "\"\\u{1F600}\"")
+    Assert.Equal(StringLiteral "\U0010FFFF", stringLiteral "\"\\u{10FFFF}\"")
+    Assert.Equal(StringLiteral "\000", stringLiteral "\"\\u{000000}\"")
+
+[<Fact>]
+let ``a malformed unicode escape is a scan error`` () =
+    for bad in [ "\\u41"; "\\u{}"; "\\u{1234567}"; "\\u{12"; "\\u{G}" ] do
+        Assert.Contains("1-6 hex digits", scanErrorOf $"\"{bad}\"")
+    Assert.Contains("surrogate", scanErrorOf "\"\\u{D800}\"")
+    Assert.Contains("surrogate", scanErrorOf "\"\\u{dfff}\"")
+    Assert.Contains("10FFFF", scanErrorOf "\"\\u{110000}\"")
+
+[<Fact>]
+let ``hex escapes take exactly two digits up to 7F`` () =
+    Assert.Equal(StringLiteral "A~", stringLiteral "\"\\x41\\x7e\"")
+    Assert.Equal(StringLiteral "\0001", stringLiteral "\"\\x001\"")
+    for bad in [ "\\x80"; "\\xFF"; "\\x4"; "\\xG1"; "\\x" ] do
+        Assert.Contains("exactly 2 hex digits", scanErrorOf $"\"{bad}\"")
+
+[<Fact>]
+let ``a raw string keeps backslashes and processes no escapes`` () =
+    Assert.Equal(StringLiteral @"\d+\.\d+", stringLiteral "r\"\\d+\\.\\d+\"")
+    Assert.Equal(StringLiteral @"\n", stringLiteral "r'\\n'")
+    Assert.Equal(StringLiteral "it\"s", stringLiteral "r'it\"s'")
+    Assert.Equal(StringLiteral "", stringLiteral "r\"\"")
+
+[<Fact>]
+let ``a raw string may span lines, and lines after it are counted`` () =
+    let tokens, errors = scanTokens "r\"a\nb\"\nx"
+    Assert.Empty errors
+    Assert.Equal(StringLiteral "a\nb", tokens.[0].Literal)
+    let x = tokens |> List.find (fun t -> t.Lexeme = "x")
+    Assert.Equal(3, x.Line)
+
+[<Fact>]
+let ``r followed by a space and a string is a call, not a raw string`` () =
+    Assert.Equal<TokenType list>([ Identifier; String; Eof ], tokenTypes "r \"x\"")
+    Assert.Equal<TokenType list>([ Identifier; String; Eof ], tokenTypes "rr\"x\"")
+    Assert.Equal<TokenType list>([ String; Eof ], tokenTypes "r\"x\"")
+
+[<Fact>]
+let ``an unterminated raw string is an error`` () =
+    Assert.Contains("Unterminated string", scanErrorOf "r\"abc")
+
+[<Fact>]
+let ``non-ASCII characters are fine in strings and comments but not identifiers`` () =
+    Assert.Equal(StringLiteral "héllo 😀", stringLiteral "\"héllo 😀\"")
+    let _, errors = scanTokens "# ä comment\n<# ö #>\nx"
+    Assert.Empty errors
+    Assert.Contains("non-ASCII", scanErrorOf "var é = 1")
+
+[<Fact>]
+let ``source decoding is strict UTF-8 and skips a byte-order mark`` () =
+    let utf8 (s: string) = System.Text.Encoding.UTF8.GetBytes s
+    Assert.Equal(Ok "print \"é\"", decodeSource (utf8 "print \"é\""))
+    Assert.Equal(Ok "x", decodeSource (Array.append [| 0xEFuy; 0xBBuy; 0xBFuy |] (utf8 "x")))
+    match decodeSource (Array.concat [ utf8 "a\nb\n\"x"; [| 0xE4uy |]; utf8 "\"" ]) with
+    | Error e ->
+        Assert.Equal("Source file is not valid UTF-8.", e.Message)
+        Assert.Equal(3, e.Line)
+        Assert.Equal(3, e.Column)
+    | Ok s -> failwith $"expected an error, got {s}"

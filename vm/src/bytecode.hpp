@@ -111,6 +111,7 @@ enum class OpCode : uint8_t {
     BitNot = 0x3C,
     ShiftLeft = 0x3D,
     ShiftRight = 0x3E,
+    IterableLength = 0x3F,
 };
 
 // Loads `path` as a format-v1 bytecode file and returns its top-level

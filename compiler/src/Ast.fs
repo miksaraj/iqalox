@@ -71,7 +71,9 @@ type Expr =
     /// cases). `InternalVectorLength`/`InternalVectorAppend` are the only
     /// two primitives that desugaring needs and that don't already exist
     /// as ordinary surface syntax.
-    | InternalVectorLength of vector: Expr
+    /// `iterable` (docs/PLAN-0.4.md decision 15): a comprehension generator,
+    /// which also accepts a string; cons stays vector-only (decision 44).
+    | InternalVectorLength of vector: Expr * iterable: bool
     | InternalVectorAppend of vector: Expr * value: Expr
     | SelfExpr of keyword: Token
     | SuperExpr of keyword: Token * method: Token
