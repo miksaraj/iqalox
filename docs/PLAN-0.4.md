@@ -1008,7 +1008,8 @@ at the start of this phase).
     under GC stress. `test_bytecode.cpp` checks the loader rejects
     invalid UTF-8.
 - **Sanitizers.** Clean under ASan/UBSan.
-- **Optimizer differential.** DIFFRESULT
+- **Optimizer differential.** Passes on 204 programs, `strings.iqx`
+  included.
 - **Examples.** A new `langspec/examples/strings.iqx`.
 - **Docs.** `docs/LANGUAGE.md` §2 (escapes, raw strings, UTF-8 source),
   §3 (the string model) and §13 (`length`), the lexical grammar in
